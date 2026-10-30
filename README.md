@@ -11,6 +11,13 @@ iPhone / iPad 原生视频订阅客户端，支持 CMS JSON 点播、M3U / TXT �
 
 详细操作和播放行为见[功能说明](Docs/Features.md)。
 
+### 页面预览
+
+| 订阅 | 搜索 | 历史 | 设置 |
+|:---:|:---:|:---:|:---:|
+| [<img src="Docs/Images/subscriptions.png" alt="订阅页面" width="200">](Docs/Images/subscriptions.png) | [<img src="Docs/Images/search.png" alt="搜索页面" width="200">](Docs/Images/search.png) | [<img src="Docs/Images/history.png" alt="观看历史页面" width="200">](Docs/Images/history.png) | [<img src="Docs/Images/settings.png" alt="设置页面" width="200">](Docs/Images/settings.png) |
+
+
 ## 订阅
 
 ### 添加与管理
@@ -23,21 +30,20 @@ iPhone / iPad 原生视频订阅客户端，支持 CMS JSON 点播、M3U / TXT �
 
 ### 默认订阅源
 
-首次运行添加下表的 13 个 CMS JSON 点播接口和 3 个直播列表。升级只补充新增预置项，不恢复用户删除的旧源；已有同类型同地址订阅保留原名称和身份。删除后重启不会恢复，设置页可手动添加缺少的默认源。
+默认配置包含下表的 13 个 CMS JSON 点播接口和 3 个直播列表。同类型、同地址的订阅不会重复添加；删除后不会自动恢复，可在设置页手动补充。
 
 源站可用性、地区限制和测试范围见[资源验证记录](Docs/DefaultSources.md)。导入成功不代表全部内容都能播放。
 
-
 #### 资源地址与来源
 
-点播接口发现于 [cms-player/vod-source](https://github.com/cms-player/vod-source/blob/main/source.json)，360 接口另见 [fangkuia/XPTV](https://github.com/fangkuia/XPTV/blob/main/allinone.json)。这些是接口收录来源，不代表服务由 GitHub 或本 App 运营，也不代表已取得内容授权。
+点播接口的 GitHub 收录参考 [cms-player/vod-source](https://github.com/cms-player/vod-source/blob/main/source.json)，360 接口另见 [fangkuia/XPTV](https://github.com/fangkuia/XPTV/blob/main/allinone.json)。这些是接口收录来源，不代表服务由 GitHub 或本 App 运营，也不代表已取得内容授权。
 
 | 点播源 | CMS JSON 地址 | 收录来源 |
 |---|---|---|
-| 暴风资源 | `https://bfzyapi.com/api.php/provide/vod/` | 原有默认配置 |
-| 非凡资源 | `https://api.ffzyapi.com/api.php/provide/vod/` | 原有默认配置 |
-| 索尼资源 | `https://suoniapi.com/api.php/provide/vod/` | 原有默认配置；cms-player/vod-source 亦收录 |
-| 魔都动漫 | `https://www.mdzyapi.com/api.php/provide/vod/` | 原有默认配置 |
+| 暴风资源 | `https://bfzyapi.com/api.php/provide/vod/` | — |
+| 非凡资源 | `https://api.ffzyapi.com/api.php/provide/vod/` | — |
+| 索尼资源 | `https://suoniapi.com/api.php/provide/vod/` | cms-player/vod-source |
+| 魔都动漫 | `https://www.mdzyapi.com/api.php/provide/vod/` | — |
 | 量子资源 | `https://cj.lziapi.com/api.php/provide/vod/` | cms-player/vod-source |
 | 红牛资源 | `https://www.hongniuzy2.com/api.php/provide/vod/` | cms-player/vod-source |
 | 360资源 | `https://360zy.com/api.php/provide/vod/` | fangkuia/XPTV |
@@ -48,16 +54,11 @@ iPhone / iPad 原生视频订阅客户端，支持 CMS JSON 点播、M3U / TXT �
 | U酷资源 | `https://api.ukuapi.com/api.php/provide/vod/` | cms-player/vod-source |
 | 闪电资源 | `https://sdzyapi.com/api.php/provide/vod/` | cms-player/vod-source |
 
-暴风、非凡、索尼、魔都为项目原有预置接口，除表中注明外，本轮未重新追溯其收录来源或重新测试；未用猜测的 GitHub 地址补全出处。
-
 | 直播列表 | M3U 地址 | 来源项目 |
 |---|---|---|
 | IPTV-org 中文 | `https://iptv-org.github.io/iptv/languages/zho.m3u` | [iptv-org/iptv](https://github.com/iptv-org/iptv) |
 | Free-TV 国际 | `https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8` | [Free-TV/IPTV](https://github.com/Free-TV/IPTV) |
 | IPTV-org 新闻 | `https://iptv-org.github.io/iptv/categories/news.m3u` | [iptv-org/iptv](https://github.com/iptv-org/iptv) |
-
-2026-10-30 新增的极速、光速、ikun、U酷、闪电和新闻列表均通过当前 Mac 网络下的接口/清单、媒体分片访问和至少一个视频样本的两秒解码抽测。未逐项做 iPad 实机、长时播放或全量内容验证。测试可用不等于获得内容授权，源站、网络和地区限制会影响结果。
-
 
 ## 开发
 
@@ -88,4 +89,4 @@ xcodebuild -project HuTV.xcodeproj -scheme HuTV \
 - [Mac / Windows 签名续期](Docs/SigningRefresh.md)
 - [发布准备清单](Docs/Release/Checklist.md)
 
-隐私说明随 App 打包，可在“设置 → 隐私与数据”查看。当前仍保留默认源，发布准备不代表已取得内容授权或已满足全部审核条件。
+隐私说明随 App 打包，可在“设置 → 隐私与数据”查看。发布前需核实默认源的内容授权，并完成相应审核要求。
