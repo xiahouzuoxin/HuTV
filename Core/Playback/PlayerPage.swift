@@ -10,16 +10,22 @@ struct PlayerPage<Content: View>: View {
     let subtitle: String
     let programInfo: String?
     let kind: PlayerPageKind
+    let isChoosingSource: Bool
     let onSwitchSource: () -> Void
     private let content: (Binding<Bool>) -> Content
     @Environment(\.dismiss) private var dismiss
     @State private var controlsVisible = false
+    @State private var interacting = false
+    @GestureState private var headerTouch = false
+    @State private var activityRevision = UUID()
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
 
-    init(title: String, subtitle: String, programInfo: String? = nil, kind: PlayerPageKind,
+    init(title: String, subtitle: String, programInfo: String? = nil, kind: PlayerPageKind, isChoosingSource: Bool = false,
          onSwitchSource: @escaping () -> Void,
          @ViewBuilder content: @escaping (Binding<Bool>) -> Content) {
         self.title = title; self.subtitle = subtitle; self.programInfo = programInfo
-        self.kind = kind; self.onSwitchSource = onSwitchSource; self.content = content
+        self.kind = kind; self.isChoosingSource = isChoosingSource; self.onSwitchSource = onSwitchSource; self.content = content
     }
 
     var body: some View {
@@ -48,15 +54,35 @@ struct PlayerPage<Content: View>: View {
                 .foregroundStyle(.white).padding()
                 .background(LinearGradient(colors: [.black.opacity(0.7), .clear], startPoint: .top, endPoint: .bottom))
                 .transition(.opacity)
+                .simultaneousGesture(DragGesture(minimumDistance: 0)
+                    .updating($headerTouch) { _, touching, _ in touching = true })
             }
+        }
+        .onChange(of: headerTouch) { _, active in registerInteraction(active ? .began : .ended) }
+        .environment(\.playerControlsInteraction, registerInteraction)
+        .task(id: "\(controlsVisible)|\(interacting)|\(activityRevision)|\(isChoosingSource)|\(scenePhase)|\(voiceOver)") {
+            guard controlsVisible, !interacting, !isChoosingSource, scenePhase == .active, !voiceOver else { return }
+            do { try await Task.sleep(for: .seconds(5)) } catch { return }
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.15)) { controlsVisible = false }
         }
         .statusBarHidden(!controlsVisible)
         .persistentSystemOverlays(controlsVisible ? .automatic : .hidden)
+    }
+
+    private func registerInteraction(_ event: PlayerControlsInteraction) {
+        switch event {
+        case .activity: break
+        case .began: interacting = true
+        case .ended: interacting = false
+        }
+        activityRevision = UUID()
     }
 }
 
 private struct PlayerSettingsMenu: View {
     let kind: PlayerPageKind
+    @Environment(\.playerControlsInteraction) private var interaction
     @AppStorage("playback.engine") private var engine: PlaybackEngine = .avPlayer
     @AppStorage("playback.autoAdvance") private var autoAdvance = true
     @AppStorage("playback.forwardBufferSeconds") private var bufferSeconds = 30.0
@@ -81,5 +107,8 @@ private struct PlayerSettingsMenu: View {
             }
         }
         .accessibilityLabel("播放设置，当前内核 \(engine.label)")
+        .onChange(of: engine) { interaction(.activity) }
+        .onChange(of: autoAdvance) { interaction(.activity) }
+        .onChange(of: bufferSeconds) { interaction(.activity) }
     }
 }

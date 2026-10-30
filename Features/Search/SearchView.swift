@@ -26,9 +26,24 @@ struct SearchView: View {
                     ContentUnavailableView("没有点播源", systemImage: "shippingbox",
                                            description: Text("请先在订阅页添加点播 API"))
                 } else {
-                    sourceTabs
-                    if let group = model.groups.first(where: { $0.id == selectedSource }) ?? model.groups.first {
-                        results(group)
+                    GeometryReader { geometry in
+                        HStack(spacing: 0) {
+                            sourceSidebar
+                                .frame(width: min(220, max(108, geometry.size.width * 0.23)))
+                            Divider()
+                            if let group = activeGroup {
+                                VStack(spacing: 0) {
+                                    HStack {
+                                        Text(group.source.title).font(.headline).lineLimit(1)
+                                        Spacer(minLength: 4)
+                                        if !group.isLoading && group.error == nil {
+                                            Text("\(group.items.count) 个结果").font(.caption).foregroundStyle(.secondary)
+                                        }
+                                    }.padding(12)
+                                    results(group).frame(maxWidth: .infinity, maxHeight: .infinity)
+                                }
+                            }
+                        }
                     }
                 }
             } else {
@@ -47,33 +62,52 @@ struct SearchView: View {
         }
     }
 
-    private var sourceTabs: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(model.groups) { group in
-                    Button { selectedSource = group.id } label: {
-                        HStack(spacing: 6) {
-                            Text(group.source.title).lineLimit(1)
-                            if group.isLoading { ProgressView().controlSize(.mini) }
-                            else if group.error != nil { Image(systemName: "exclamationmark.circle") }
-                            else { Text("\(group.items.count)").monospacedDigit() }
+    private var activeGroup: SourceSearchResults? {
+        model.groups.first(where: { $0.id == selectedSource }) ?? model.rankedGroups.first
+    }
+
+    private var sourceSidebar: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("资源").font(.headline)
+                Spacer(minLength: 0)
+            }.padding(12)
+            ScrollView {
+                LazyVStack(spacing: 6) {
+                    ForEach(model.rankedGroups) { group in
+                        Button { selectedSource = group.id } label: {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(group.source.title).font(.subheadline).lineLimit(2)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                HStack(spacing: 4) {
+                                    if group.isLoading {
+                                        ProgressView().controlSize(.mini)
+                                        Text("搜索中")
+                                    } else if group.error != nil {
+                                        Image(systemName: "exclamationmark.circle")
+                                        Text("失败")
+                                    } else {
+                                        Text("\(group.items.count) 个结果").monospacedDigit()
+                                    }
+                                }.font(.caption2).foregroundStyle(.secondary)
+                            }
+                            .padding(10).frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+                            .background(activeGroup?.id == group.id ? Color.accentColor.opacity(0.14) : .clear,
+                                        in: RoundedRectangle(cornerRadius: 9))
+                            .foregroundStyle(activeGroup?.id == group.id ? Color.accentColor : .primary)
                         }
-                        .font(.subheadline)
-                        .padding(.horizontal, 12).padding(.vertical, 9)
-                        .background(selectedSource == group.id ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.08),
-                                    in: Capsule())
-                        .foregroundStyle(selectedSource == group.id ? Color.accentColor : .primary)
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(activeGroup?.id == group.id ? .isSelected : [])
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(selectedSource == group.id ? .isSelected : [])
-                }
-            }.padding(.horizontal).padding(.vertical, 10)
+                }.padding(.horizontal, 6).padding(.bottom, 12)
+            }
         }
+        .background(Color(.secondarySystemGroupedBackground))
     }
 
     @ViewBuilder private func results(_ group: SourceSearchResults) -> some View {
         if group.isLoading {
-            Spacer(); ProgressView("正在搜索 \(group.source.title)…"); Spacer()
+            ProgressView("正在搜索…")
         } else if let error = group.error {
             ContentUnavailableView {
                 Label("该源搜索失败", systemImage: "exclamationmark.triangle")
@@ -84,19 +118,35 @@ struct SearchView: View {
             ContentUnavailableView("该源没有找到结果", systemImage: "magnifyingglass",
                                    description: Text("试试其他订阅源或更换关键词"))
         } else {
-            List(group.items) { item in
-                NavigationLink {
-                    MediaDetailView(provider: group.source.provider, item: item)
-                } label: {
-                    HStack(spacing: 12) {
-                        AsyncImage(url: item.posterURL) { $0.resizable().scaledToFill() }
-                            placeholder: { Rectangle().fill(.quaternary) }
-                            .frame(width: 54, height: 76).clipShape(RoundedRectangle(cornerRadius: 5))
-                        Text(item.title)
+            ScrollView {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 110, maximum: 200), spacing: 12)],
+                          alignment: .leading, spacing: 12) {
+                    ForEach(group.items) { item in
+                        NavigationLink {
+                            MediaDetailView(provider: group.source.provider, item: item)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 0) {
+                                Rectangle().fill(Color(.tertiarySystemFill))
+                                    .aspectRatio(2.0 / 3.0, contentMode: .fit)
+                                    .overlay {
+                                        AsyncImage(url: item.posterURL) { phase in
+                                            if let image = phase.image { image.resizable().scaledToFill() }
+                                            else { Image(systemName: "film").font(.largeTitle).foregroundStyle(.secondary) }
+                                        }
+                                    }.clipped()
+                                Text(item.title).font(.subheadline.weight(.medium))
+                                    .foregroundStyle(.primary).lineLimit(2, reservesSpace: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading).padding(8)
+                            }
+                            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+                        .buttonStyle(.plain)
                     }
-                }
+                }.padding(.horizontal, 12).padding(.bottom, 12)
             }
-            .listStyle(.plain)
+            .background(Color(.systemGroupedBackground))
+            .id(group.id)
         }
     }
 
@@ -131,7 +181,7 @@ struct SearchView: View {
         searchTask?.cancel()
         history.addSearch(value)
         let snapshot = sources
-        selectedSource = snapshot.first?.id
+        selectedSource = nil
         searchTask = Task { await model.search(value, sources: snapshot) }
     }
 }

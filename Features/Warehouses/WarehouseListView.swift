@@ -3,6 +3,7 @@ import SwiftUI
 struct WarehouseListView: View {
     @Environment(WarehouseStore.self) private var store
     @State private var showingImporter = false
+    @State private var editingSubscription: Warehouse?
     @State private var editMode: EditMode = .inactive
     @State private var refreshError: String?
 
@@ -20,6 +21,13 @@ struct WarehouseListView: View {
                 subscriptionSection(.tvbox, title: "聚合配置")
             }
         }
+        .safeAreaInset(edge: .bottom) {
+            if editMode.isEditing {
+                Text("点击订阅修改名称和链接；拖动右侧手柄排序。")
+                    .font(.footnote).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity).padding(10).background(.regularMaterial)
+            }
+        }
         .navigationTitle("视频订阅")
         .environment(\.editMode, $editMode)
         .toolbar {
@@ -34,6 +42,7 @@ struct WarehouseListView: View {
                     .disabled(editMode.isEditing)
             }
         }
+        .sheet(item: $editingSubscription) { EditSubscriptionView(warehouse: $0) }
         .sheet(isPresented: $showingImporter) { ImportSubscriptionView() }
         .refreshable {
             let failures = await store.refreshAll()
@@ -72,16 +81,22 @@ struct WarehouseListView: View {
         if !subscriptions.isEmpty {
             Section("\(title)（\(subscriptions.count)）") {
                 ForEach(subscriptions) { warehouse in
-                    NavigationLink(value: warehouse.id) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(warehouse.name).font(.headline)
-                            Text("\(warehouse.kind.label) · \(warehouse.config.sites.count) 个点播源 · \(warehouse.config.lives.count) 组直播")
-                                .font(.caption).foregroundStyle(.secondary)
-                            Text("更新于 \(warehouse.updatedAt.formatted(date: .abbreviated, time: .shortened))")
-                                .font(.caption2).foregroundStyle(.tertiary)
+                    Group {
+                        if editMode.isEditing {
+                            Button { editingSubscription = warehouse } label: {
+                                subscriptionLabel(warehouse)
+                            }.buttonStyle(.plain)
+                        } else {
+                            NavigationLink(value: warehouse.id) {
+                                subscriptionLabel(warehouse)
+                            }
                         }
                     }
+                    .contextMenu {
+                        Button("查看与编辑链接", systemImage: "pencil") { editingSubscription = warehouse }
+                    }
                     .swipeActions(edge: .trailing) {
+                        Button("编辑", systemImage: "pencil") { editingSubscription = warehouse }.tint(.blue)
                         Button("删除", systemImage: "trash", role: .destructive) {
                             store.delete(id: warehouse.id)
                         }
@@ -96,6 +111,22 @@ struct WarehouseListView: View {
                 .onMove { store.move(from: $0, to: $1, kind: kind) }
             }
         }
+    }
+
+    private func subscriptionLabel(_ warehouse: Warehouse) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(warehouse.name).font(.headline)
+            Text("\(warehouse.kind.label) · \(warehouse.config.sites.count) 个点播源 · \(warehouse.config.lives.count) 组直播")
+                .font(.caption).foregroundStyle(.secondary)
+            if editMode.isEditing {
+                Text(warehouse.configURL.absoluteString).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            } else {
+                Text("更新于 \(warehouse.updatedAt.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 
     @MainActor private func refresh(_ id: UUID) async {

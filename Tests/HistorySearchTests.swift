@@ -94,4 +94,18 @@ final class HistorySearchTests: XCTestCase {
         XCTAssertFalse(model.hasSearched)
         XCTAssertTrue(model.groups.isEmpty)
     }
+    func testSearchSourcesRankBySuccessfulResultCountWithStableTies() {
+        func group(_ id: String, count: Int = 0, loading: Bool = false, error: String? = nil) -> SourceSearchResults {
+            let source = SearchSource(provider: SearchFixtureProvider(id: id, delay: 0), title: id)
+            let items = (0..<count).map { MediaItem(id: "\(id)/\($0)", sourceID: id, title: "影片", posterURL: nil, detailID: "\($0)") }
+            return SourceSearchResults(source: source, items: items, isLoading: loading, error: error)
+        }
+        let input = [group("empty"), group("failed", count: 20, error: "error"),
+                     group("one", count: 1), group("pending", loading: true),
+                     group("threeA", count: 3), group("threeB", count: 3)]
+        XCTAssertEqual(SourceSearchResults.ranked(input).map(\.id),
+                       ["threeA", "threeB", "one", "pending", "empty", "failed"])
+        XCTAssertEqual(input.map(\.id), ["empty", "failed", "one", "pending", "threeA", "threeB"])
+    }
+
 }

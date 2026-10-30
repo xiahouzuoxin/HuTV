@@ -23,6 +23,7 @@ struct NativePlayerView: View {
     var canPrevious = false
     var canNext = false
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.playerControlsInteraction) private var interaction
     @StateObject private var controller = PlaybackController()
     @AppStorage("playback.engine") private var engine: PlaybackEngine = .avPlayer
     @AppStorage("playback.volume") private var volume = 1.0
@@ -109,6 +110,7 @@ struct NativePlayerView: View {
             controller.setForeground(phase == .active)
         }
         .onDisappear {
+            interaction(.ended)
             controller.stop()
             if let originalBrightness { screen.brightness = originalBrightness }
         }
@@ -119,6 +121,7 @@ struct NativePlayerView: View {
     }
 
     private func togglePlayback() {
+        interaction(.activity)
         guard controller.ready, controller.errorMessage == nil else { return }
         controller.togglePlay()
         controller.saveProgress()
@@ -127,6 +130,7 @@ struct NativePlayerView: View {
     private func handlePan(_ state: UIGestureRecognizer.State, _ delta: CGPoint, _ location: CGPoint, _ size: CGSize) {
         guard size.width > 0, size.height > 0 else { return }
         if state == .began {
+            interaction(.began)
             gestureMode = nil
             gestureLabel = nil
         }
@@ -164,6 +168,7 @@ struct NativePlayerView: View {
             case nil: break
             }
         } else if state == .ended || state == .cancelled || state == .failed {
+            interaction(.ended)
             if state == .ended, gestureMode == .seek {
                 let target = seekPreview
                 Task { await controller.seek(to: target) }

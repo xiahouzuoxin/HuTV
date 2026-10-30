@@ -3,6 +3,7 @@ import SwiftUI
 struct ImportSubscriptionView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(WarehouseStore.self) private var store
+    @State private var showingBatchImporter = false
     @State private var kind: SubscriptionKind = .cms
     @State private var name = ""
     @State private var urlText = ""
@@ -12,6 +13,9 @@ struct ImportSubscriptionView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    Button("通过 JSON 批量导入", systemImage: "square.stack.badge.plus") { showingBatchImporter = true }
+                }
                 Section("订阅类型") {
                     ForEach(SubscriptionKind.allCases) { value in
                         Button {
@@ -54,6 +58,7 @@ struct ImportSubscriptionView: View {
                     }
                 }
             }
+            .sheet(isPresented: $showingBatchImporter) { BatchImportView() }
             .navigationTitle("添加订阅")
             .onChange(of: kind) { errorMessage = nil }
             .toolbar {

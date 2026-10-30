@@ -19,7 +19,7 @@ struct LivePlayerView: View {
         let run = playbackRevision
         let programInfo = programs.first.map { "\($0.start)–\($0.end)  \($0.title)" }
         PlayerPage(title: channel.name, subtitle: source.name, programInfo: programInfo,
-                   kind: .live, onSwitchSource: { showingSourcePicker = true }) { controls in
+                   kind: .live, isChoosingSource: showingSourcePicker, onSwitchSource: { showingSourcePicker = true }) { controls in
 
             if channel.streams.indices.contains(selectedLine) {
                 NativePlayerView(resource: PlaybackResource(url: channel.streams[selectedLine].url,

@@ -31,6 +31,7 @@ struct VLCVideoSurface: UIViewRepresentable {
 }
 
 struct PlaybackTransportControls: View {
+    @Environment(\.playerControlsInteraction) private var interaction
     @ObservedObject var controller: PlaybackController
     var onPrevious: (() -> Void)?
     var onNext: (() -> Void)?
@@ -49,6 +50,35 @@ struct PlaybackTransportControls: View {
                 } else if controller.isBuffering { Text("缓冲中…") }
                 Spacer()
                 Menu {
+                    Button {
+                        interaction(.activity)
+                        controller.selectQuality(nil)
+                    } label: {
+                        if controller.selectedQualityID == nil { Label("自动", systemImage: "checkmark") }
+                        else { Text("自动") }
+                    }
+                    ForEach(controller.qualityOptions) { option in
+                        Button {
+                            interaction(.activity)
+                            controller.selectQuality(option.id)
+                        } label: {
+                            if controller.selectedQualityID == option.id { Label(option.menuLabel, systemImage: "checkmark") }
+                            else { Text(option.menuLabel) }
+                        }
+                    }
+                    if controller.detectingQuality {
+                        Text("正在检测可用清晰度…")
+                    } else if controller.qualityOptions.isEmpty {
+                        Text("当前源或内核未提供可切换清晰度")
+                    } else {
+                        Text(controller.vlcPlayer == nil ? "按分辨率和码率上限选择，实际画质随网络调整" : "选择源提供的视频轨，自动恢复默认视频轨")
+                    }
+                } label: {
+                    Text(controller.qualityLabel).padding(.horizontal, 8).frame(minHeight: 32)
+                }
+                .accessibilityLabel("清晰度，当前 \(controller.qualityLabel)")
+                .simultaneousGesture(TapGesture().onEnded { interaction(.activity) })
+                Menu {
                     Picker("播放速度", selection: $playbackRate) {
                         ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0], id: \.self) { rate in
                             Text("\(rate.formatted())×").tag(rate)
@@ -58,6 +88,7 @@ struct PlaybackTransportControls: View {
                     Text("\(playbackRate.formatted())×").padding(.horizontal, 8).frame(minHeight: 32)
                 }
                 .accessibilityLabel("播放速度，当前 \(playbackRate.formatted()) 倍")
+                .simultaneousGesture(TapGesture().onEnded { interaction(.activity) })
             }.font(.caption2).foregroundStyle(.white.opacity(0.8))
             HStack(spacing: 6) {
                 transportButtons
@@ -74,6 +105,7 @@ struct PlaybackTransportControls: View {
                             .frame(width: (editing ? preview : current) / total * geometry.size.width, height: 4)
                         Slider(value: Binding(get: { editing ? preview : current }, set: { preview = $0 }),
                                in: 0...total, onEditingChanged: { active in
+                            interaction(active ? .began : .ended)
                             if active { preview = current }
                             editing = active
                             if !active { Task { await controller.seek(to: preview) } }
@@ -89,20 +121,21 @@ struct PlaybackTransportControls: View {
         }
         .foregroundStyle(.white).padding(.horizontal, 12).padding(.vertical, 8)
         .background(.black.opacity(0.65))
+        .onChange(of: playbackRate) { interaction(.activity) }
     }
     private var transportButtons: some View {
         HStack(spacing: 0) {
             if onPrevious != nil || onNext != nil {
-                Button { onPrevious?() } label: {
+                Button { interaction(.activity); onPrevious?() } label: {
                     Image(systemName: "backward.end.fill").font(.title3).frame(width: 44, height: 44)
                 }.disabled(!canPrevious).opacity(canPrevious ? 1 : 0.3).accessibilityLabel("上一集")
             }
-            Button { controller.togglePlay() } label: {
+            Button { interaction(.activity); controller.togglePlay() } label: {
                 Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill")
                     .font(.title2).frame(width: 44, height: 44)
             }.accessibilityLabel(controller.isPlaying ? "暂停" : "播放")
             if onPrevious != nil || onNext != nil {
-                Button { onNext?() } label: {
+                Button { interaction(.activity); onNext?() } label: {
                     Image(systemName: "forward.end.fill").font(.title3).frame(width: 44, height: 44)
                 }.disabled(!canNext).opacity(canNext ? 1 : 0.3).accessibilityLabel("下一集")
             }

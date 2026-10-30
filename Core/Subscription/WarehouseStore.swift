@@ -1,6 +1,17 @@
 import Foundation
 import Observation
 
+enum SubscriptionEditError: LocalizedError {
+    case missing, duplicate, changed
+    var errorDescription: String? {
+        switch self {
+        case .missing: "此订阅已被删除。"
+        case .duplicate: "相同类型的订阅地址已存在，请编辑已有订阅。"
+        case .changed: "订阅已在其他操作中修改，请关闭后重新打开。"
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class WarehouseStore {
@@ -40,13 +51,98 @@ final class WarehouseStore {
         try save()
     }
 
+    func update(id: UUID, name: String, address: String) async throws {
+        guard let old = warehouses.first(where: { $0.id == id }) else { throw SubscriptionEditError.missing }
+        guard let url = URL(string: address.trimmingCharacters(in: .whitespacesAndNewlines)),
+              url.host != nil, ["http", "https"].contains(url.scheme?.lowercased()) else { throw URLError(.badURL) }
+        func duplicate() -> Bool {
+            warehouses.contains { $0.id != id && $0.kind == old.kind && DefaultSubscriptions.matches($0.configURL, url) }
+        }
+        guard !duplicate() else { throw SubscriptionEditError.duplicate }
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = trimmedName.isEmpty ? old.name : trimmedName
+        var replacement: Warehouse
+        if url == old.configURL {
+            replacement = old
+            replacement.name = title
+            if old.kind == .cms, replacement.config.sites.count == 1 { replacement.config.sites[0].name = title }
+            if old.kind == .live, replacement.config.lives.count == 1 { replacement.config.lives[0].name = title }
+        } else {
+            var original = old
+            original.etag = nil; original.lastModified = nil
+            replacement = try await loader.load(from: url, kind: old.kind, name: title, replacing: original)
+        }
+        try Task.checkCancellation()
+        guard let index = warehouses.firstIndex(where: { $0.id == id }) else { throw SubscriptionEditError.missing }
+        guard warehouses[index].configURL == old.configURL, warehouses[index].name == old.name else { throw SubscriptionEditError.changed }
+        guard !duplicate() else { throw SubscriptionEditError.duplicate }
+        let previous = warehouses[index]
+        warehouses[index] = replacement
+        do { try save() }
+        catch { warehouses[index] = previous; throw error }
+    }
+
+    func importBatch(_ entries: [BatchSubscriptionEntry]) async throws -> [BatchImportOutcome] {
+        var outcomes: [Int: BatchImportOutcome] = [:]
+        var pending: [BatchSubscriptionEntry] = []
+        var seen = Set<String>()
+        for entry in entries {
+            guard let kind = entry.kind, entry.issue == nil, let url = URL(string: entry.address) else {
+                outcomes[entry.id] = BatchImportOutcome(id: entry.id, name: entry.name, status: .skipped, message: entry.issue ?? "地址无效")
+                continue
+            }
+            let key = kind.rawValue + "|" + DefaultSubscriptions.canonicalKey(url)
+            if !seen.insert(key).inserted || warehouses.contains(where: { $0.kind == kind && DefaultSubscriptions.matches($0.configURL, url) }) {
+                outcomes[entry.id] = BatchImportOutcome(id: entry.id, name: entry.name, status: .skipped, message: "相同订阅已存在，保留原名称和顺序")
+            } else { pending.append(entry) }
+        }
+        let loader = self.loader
+        let loaded = await withTaskGroup(of: (BatchSubscriptionEntry, Warehouse?, String?).self) { tasks in
+            var iterator = pending.makeIterator()
+            func enqueue(_ entry: BatchSubscriptionEntry) {
+                tasks.addTask {
+                    do {
+                        let value = try await loader.load(from: URL(string: entry.address)!, kind: entry.kind!, name: entry.name)
+                        return (entry, value, nil)
+                    } catch { return (entry, nil, error.localizedDescription) }
+                }
+            }
+            for _ in 0..<4 { if let entry = iterator.next() { enqueue(entry) } }
+            var results: [Int: Warehouse] = [:]
+            for await (entry, warehouse, error) in tasks {
+                if Task.isCancelled { tasks.cancelAll(); break }
+                if let warehouse { results[entry.id] = warehouse }
+                else { outcomes[entry.id] = BatchImportOutcome(id: entry.id, name: entry.name, status: .failed, message: error ?? "验证失败") }
+                if let next = iterator.next() { enqueue(next) }
+            }
+            return results
+        }
+        try Task.checkCancellation()
+        let previous = warehouses
+        for entry in pending {
+            guard let warehouse = loaded[entry.id] else { continue }
+            if warehouses.contains(where: { $0.kind == warehouse.kind && DefaultSubscriptions.matches($0.configURL, warehouse.configURL) }) {
+                outcomes[entry.id] = BatchImportOutcome(id: entry.id, name: entry.name, status: .skipped, message: "相同订阅已存在")
+            } else {
+                warehouses.append(warehouse)
+                outcomes[entry.id] = BatchImportOutcome(id: entry.id, name: entry.name, status: .added, message: "格式验证通过，已添加；不代表全部媒体可播放")
+            }
+        }
+        do { try save() }
+        catch { warehouses = previous; lastPersistenceError = error.localizedDescription; throw error }
+        return entries.compactMap { outcomes[$0.id] }
+    }
+
     func refresh(id: UUID) async throws {
         guard let index = warehouses.firstIndex(where: { $0.id == id }) else { return }
         let old = warehouses[index]
         refreshingIDs.insert(id)
         defer { refreshingIDs.remove(id) }
         let refreshed = try await loader.load(from: old.configURL, kind: old.kind, replacing: old)
-        guard let currentIndex = warehouses.firstIndex(where: { $0.id == id }) else { return }
+        guard let currentIndex = warehouses.firstIndex(where: { $0.id == id }),
+              warehouses[currentIndex].configURL == old.configURL,
+              warehouses[currentIndex].name == old.name,
+              warehouses[currentIndex].updatedAt == old.updatedAt else { return }
         warehouses[currentIndex] = refreshed
         try save()
     }

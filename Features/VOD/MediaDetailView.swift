@@ -164,7 +164,7 @@ private struct OnDemandPlayerView: View {
         let activeSource = playback.source
         PlayerPage(title: playback.item.title,
                    subtitle: "\(playback.source.name) · \(episode.line) · \(episode.name)" + (finished ? " · 已播完" : ""),
-                   kind: .onDemand, onSwitchSource: { showingSourcePicker = true }) { controls in
+                   kind: .onDemand, isChoosingSource: showingSourcePicker, onSwitchSource: { showingSourcePicker = true }) { controls in
             if let url = URL(string: episode.url), ["http", "https"].contains(url.scheme?.lowercased()) {
                 NativePlayerView(resource: PlaybackResource(url: url), controlsVisible: controls,
                     startPosition: playback.startPosition,

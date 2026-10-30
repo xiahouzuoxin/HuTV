@@ -13,6 +13,63 @@ final class PlaybackController: ObservableObject {
     @Published private(set) var bufferedAhead = 0.0
     @Published private(set) var bufferedRanges: [ClosedRange<Double>] = []
     @Published private(set) var errorMessage: String?
+    @Published private(set) var qualityOptions: [PlaybackQualityOption] = []
+    @Published private(set) var selectedQualityID: String?
+    @Published private(set) var detectingQuality = false
+    private var qualityTask: Task<Void, Never>?
+    private var defaultVLCVideoTrack: Int32?
+
+    var qualityLabel: String {
+        qualityOptions.first(where: { $0.id == selectedQualityID })?.menuLabel ?? "自动"
+    }
+
+    func selectQuality(_ id: String?) {
+        let option = qualityOptions.first { $0.id == id }
+        guard id == nil || option != nil else { return }
+        if let playback = vlcPlayer {
+            guard let track = option?.videoTrackIndex ?? defaultVLCVideoTrack else { return }
+            playback.currentVideoTrackIndex = track
+        } else if let item = player?.currentItem {
+            item.preferredPeakBitRate = option.map { $0.peakBitRate.isFinite ? max(0, $0.peakBitRate) : 0 } ?? 0
+            item.preferredMaximumResolution = option.map { CGSize(width: $0.width, height: $0.height) } ?? .zero
+        } else { return }
+        selectedQualityID = id
+    }
+
+    private func discoverAVQuality(asset: AVURLAsset, run: UUID) {
+        detectingQuality = true
+        qualityTask = Task { [weak self] in
+            let variants = try? await asset.load(.variants)
+            guard let self, self.generation == run, !Task.isCancelled else { return }
+            self.qualityOptions = PlaybackQualityOption.choices((variants ?? []).compactMap { variant -> PlaybackQualityOption? in
+                guard let size = variant.videoAttributes?.presentationSize,
+                      size.width.isFinite, size.height.isFinite,
+                      size.width > 0, size.height > 0, size.width < 100_000, size.height < 100_000 else { return nil }
+                let peak = variant.peakBitRate ?? 0
+                let rate = peak > 0 ? peak : max(0, variant.averageBitRate ?? 0)
+                return PlaybackQualityOption(width: Int(size.width), height: Int(size.height), peakBitRate: rate)
+            })
+            self.detectingQuality = false
+        }
+    }
+
+    private func discoverVLCQuality(_ playback: VLCMediaPlayer) {
+        if defaultVLCVideoTrack == nil, playback.currentVideoTrackIndex >= 0 {
+            defaultVLCVideoTrack = playback.currentVideoTrackIndex
+        }
+        let indexes = Set((playback.videoTrackIndexes as? [NSNumber] ?? []).map(\.int32Value))
+        let tracks = playback.media?.tracksInformation as? [[String: Any]] ?? []
+        let options = PlaybackQualityOption.choices(tracks.compactMap { track -> PlaybackQualityOption? in
+            guard track[VLCMediaTracksInformationType] as? String == VLCMediaTracksInformationTypeVideo,
+                  let id = track[VLCMediaTracksInformationId] as? NSNumber, indexes.contains(id.int32Value), id.int32Value >= 0,
+                  let width = track[VLCMediaTracksInformationVideoWidth] as? NSNumber,
+                  let height = track[VLCMediaTracksInformationVideoHeight] as? NSNumber else { return nil }
+            return PlaybackQualityOption(width: width.intValue, height: height.intValue,
+                peakBitRate: (track[VLCMediaTracksInformationBitrate] as? NSNumber)?.doubleValue ?? 0, videoTrackIndex: id.int32Value)
+        })
+        if options != qualityOptions { qualityOptions = options }
+    }
+
     private var generation = UUID()
     private var progress: ((Double, Double) -> Void)?
     private var ended: (() -> Void)?
@@ -83,6 +140,7 @@ final class PlaybackController: ObservableObject {
         }
         item.preferredForwardBufferDuration = max(0, buffer)
         ready = true
+        discoverAVQuality(asset: asset, run: run)
         playback.play()
         saveProgress()
         var ticks = 0
@@ -118,6 +176,8 @@ final class PlaybackController: ObservableObject {
 
     func stop() {
         saveProgress()
+        qualityTask?.cancel(); qualityTask = nil
+        qualityOptions = []; selectedQualityID = nil; detectingQuality = false; defaultVLCVideoTrack = nil
         generation = UUID()
         if let vlcStateObserver {
             NotificationCenter.default.removeObserver(vlcStateObserver)
@@ -367,6 +427,7 @@ extension PlaybackController {
                 playback.stop(); isBuffering = false; updateAwake(false)
                 return
             }
+            if ready && ticks % 4 == 0 { discoverVLCQuality(playback) }
             updateAwake(!ready || playback.isPlaying || isBuffering)
             ticks += 1
             if ticks % 8 == 0 { saveProgress() }

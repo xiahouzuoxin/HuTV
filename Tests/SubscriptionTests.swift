@@ -207,4 +207,51 @@ final class SubscriptionTests: XCTestCase {
         XCTAssertEqual(restored.warehouses.map(\.id), store.warehouses.map(\.id))
     }
 
+    @MainActor func testEditingSubscriptionPreservesIdentityPositionAndRejectsDuplicates() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("subscriptions.json")
+        let store = WarehouseStore(storageURL: file, loader: SubscriptionLoader(client: FixtureHTTPClient(body: cms)))
+        let original = store.warehouses[1]
+        let order = store.warehouses.map(\.id)
+        try await store.update(id: original.id, name: "更新名称", address: "https://example.com/new-api")
+        let updated = store.warehouses[1]
+        XCTAssertEqual(updated.id, original.id)
+        XCTAssertEqual(updated.importedAt, original.importedAt)
+        XCTAssertEqual(store.warehouses.map(\.id), order)
+        XCTAssertEqual(updated.name, "更新名称")
+        XCTAssertEqual(updated.config.sites.first?.api, "https://example.com/new-api")
+        let restored = WarehouseStore(storageURL: file)
+        XCTAssertEqual(restored.warehouses[1].configURL, updated.configURL)
+        XCTAssertEqual(restored.warehouses.map(\.id), order)
+        do {
+            try await store.update(id: original.id, name: "重复", address: store.warehouses[0].configURL.absoluteString)
+            XCTFail("Should reject duplicate endpoint")
+        } catch SubscriptionEditError.duplicate { }
+        XCTAssertEqual(store.warehouses[1].name, "更新名称")
+        XCTAssertEqual(store.warehouses.count, order.count)
+    }
+
+    @MainActor func testInvalidEditedAddressLeavesSubscriptionIntactAndRenameWorksOffline() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("subscriptions.json")
+        let store = WarehouseStore(storageURL: file, loader: SubscriptionLoader(client: FixtureHTTPClient(body: "invalid JSON")))
+        let original = store.warehouses[0]
+        do {
+            try await store.update(id: original.id, name: "不应保存", address: "https://example.com/invalid")
+            XCTFail("Should fail schema validation")
+        } catch { }
+        XCTAssertEqual(store.warehouses[0].name, original.name)
+        XCTAssertEqual(store.warehouses[0].configURL, original.configURL)
+        try await store.update(id: original.id, name: "离线改名", address: original.configURL.absoluteString)
+        XCTAssertEqual(store.warehouses[0].name, "离线改名")
+        XCTAssertEqual(store.warehouses[0].config.sites.first?.name, "离线改名")
+        store.delete(id: original.id)
+        do {
+            try await store.update(id: original.id, name: "不能复活", address: original.configURL.absoluteString)
+            XCTFail("Deleted subscription must not be recreated")
+        } catch SubscriptionEditError.missing { }
+    }
+
 }

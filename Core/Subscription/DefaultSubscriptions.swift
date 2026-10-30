@@ -24,14 +24,15 @@ enum DefaultSubscriptions {
         ("IPTV-org 新闻直播", "https://iptv-org.github.io/iptv/categories/news.m3u")
     ]
 
+    static func canonicalKey(_ url: URL) -> String {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url.absoluteString }
+        components.host = components.host?.lowercased()
+        while components.path.hasSuffix("/") { components.path.removeLast() }
+        return components.string ?? url.absoluteString
+    }
+
     static func matches(_ lhs: URL, _ rhs: URL) -> Bool {
-        func canonical(_ url: URL) -> String {
-            var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
-            components.host = components.host?.lowercased()
-            while components.path.hasSuffix("/") { components.path.removeLast() }
-            return components.string ?? url.absoluteString
-        }
-        return canonical(lhs) == canonical(rhs)
+        canonicalKey(lhs) == canonicalKey(rhs)
     }
 
     // Version 1: four CMS sources; version 2: eight CMS and two live lists.
