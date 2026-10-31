@@ -56,21 +56,30 @@ final class SearchModel {
         hasSearched = true
         searchedKeyword = keyword
         groups = sources.map { SourceSearchResults(source: $0) }
-        await withTaskGroup(of: (String, [MediaItem], String?).self) { group in
+        await withTaskGroup(of: Void.self) { group in
             for source in sources {
                 group.addTask {
-                    do { return (source.id, try await source.provider.search(keyword: keyword), nil) }
-                    catch { return (source.id, [], error.localizedDescription) }
-                }
-            }
-            for await (id, items, error) in group {
-                guard !Task.isCancelled, generation == run else { group.cancelAll(); return }
-                if let index = groups.firstIndex(where: { $0.id == id }) {
-                    groups[index].items = items
-                    groups[index].isLoading = false
-                    groups[index].error = error
+                    let items: [MediaItem]
+                    let message: String?
+                    do {
+                        items = try await source.provider.search(keyword: keyword)
+                        message = nil
+                    } catch {
+                        items = []
+                        message = error.localizedDescription
+                    }
+                    guard !Task.isCancelled else { return }
+                    await self.receive(items, error: message, sourceID: source.id, generation: run)
                 }
             }
         }
+    }
+
+    private func receive(_ items: [MediaItem], error: String?, sourceID: String, generation run: UUID) {
+        guard generation == run,
+              let index = groups.firstIndex(where: { $0.id == sourceID }) else { return }
+        groups[index].items = items
+        groups[index].isLoading = false
+        groups[index].error = error
     }
 }

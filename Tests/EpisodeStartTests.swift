@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 @testable import HuTV
 
 final class EpisodeStartTests: XCTestCase {
@@ -39,6 +40,31 @@ final class EpisodeStartTests: XCTestCase {
         session.select(item: item("other"), source: source, episodes: episodes, episode: episodes[0], keepPosition: false)
         XCTAssertEqual(session.startPosition, 0)
     }
+    @MainActor func testButtonRecordsAndLongPressDoesNotRecordAgainOnRelease() {
+        let button = EpisodeStartButton(frame: .zero)
+        var recorded = 0, cleared = 0
+        button.onRecord = { recorded += 1 }
+        button.onClear = { cleared += 1 }
+        button.canRecord = true
+        button.sendActions(for: .touchDown)
+        button.sendActions(for: .touchUpInside)
+        XCTAssertEqual(recorded, 1)
+        button.sendActions(for: .touchDown)
+        button.clearFromLongPress()
+        button.sendActions(for: .touchUpInside)
+        XCTAssertEqual(cleared, 1)
+        XCTAssertEqual(recorded, 1)
+        button.sendActions(for: .touchDown)
+        button.sendActions(for: .touchUpInside)
+        XCTAssertEqual(recorded, 2)
+        button.canRecord = false
+        button.sendActions(for: .touchDown)
+        button.sendActions(for: .touchUpInside)
+        XCTAssertEqual(recorded, 2)
+        button.clearFromLongPress()
+        XCTAssertEqual(cleared, 2)
+    }
+
     @MainActor func testReadsOlderHistoryWithoutStartMarkers() throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: file) }
