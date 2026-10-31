@@ -18,14 +18,21 @@ final class WarehouseStore {
     private(set) var warehouses: [Warehouse] = []
     private(set) var refreshingIDs: Set<UUID> = []
     private(set) var lastPersistenceError: String?
+    private(set) var feeds: [SubscriptionFeed] = []
+    private(set) var isRefreshingAll = false
+    private(set) var lastRefreshErrors: [String] = []
+    private var lastAutomaticRefresh: Date?
+    private var refreshingFeedIDs: Set<UUID> = []
     private let storageURL: URL
     private let loader: SubscriptionLoader
-    private var defaultsInstalled = false
     private var installedPresetVersion = 0
     private struct Snapshot: Codable {
         var warehouses: [Warehouse]
-        var defaultsInstalled: Bool
+        // Decode-only compatibility for snapshots predating preset versions.
+        var defaultsInstalled: Bool?
         var installedPresetVersion: Int?
+        var feeds: [SubscriptionFeed]?
+        var lastAutomaticRefresh: Date?
     }
 
     init(storageURL: URL? = nil, loader: SubscriptionLoader = SubscriptionLoader(), includeDefaults: Bool = true) {
@@ -78,8 +85,10 @@ final class WarehouseStore {
         guard !duplicate() else { throw SubscriptionEditError.duplicate }
         let previous = warehouses[index]
         warehouses[index] = replacement
+        let oldFeeds = feeds
+        detachFromFeeds(id)
         do { try save() }
-        catch { warehouses[index] = previous; throw error }
+        catch { warehouses[index] = previous; feeds = oldFeeds; throw error }
     }
 
     func importBatch(_ entries: [BatchSubscriptionEntry]) async throws -> [BatchImportOutcome] {
@@ -134,7 +143,7 @@ final class WarehouseStore {
     }
 
     func refresh(id: UUID) async throws {
-        guard let index = warehouses.firstIndex(where: { $0.id == id }) else { return }
+        guard !refreshingIDs.contains(id), let index = warehouses.firstIndex(where: { $0.id == id }) else { return }
         let old = warehouses[index]
         refreshingIDs.insert(id)
         defer { refreshingIDs.remove(id) }
@@ -143,20 +152,35 @@ final class WarehouseStore {
               warehouses[currentIndex].configURL == old.configURL,
               warehouses[currentIndex].name == old.name,
               warehouses[currentIndex].updatedAt == old.updatedAt else { return }
+        try Task.checkCancellation()
         warehouses[currentIndex] = refreshed
-        try save()
+        do { try save() } catch { warehouses[currentIndex] = old; throw error }
     }
 
     func refreshAll() async -> [String] {
+        guard !isRefreshingAll else { return [] }
+        isRefreshingAll = true
+        defer { isRefreshingAll = false }
         var failures: [String] = []
-        for warehouse in warehouses {
-            do { try await refresh(id: warehouse.id) }
-            catch { failures.append("\(warehouse.name)：\(error.localizedDescription)") }
+        for feed in feeds where feed.enabled {
+            if Task.isCancelled { break }
+            do {
+                try await refreshFeed(id: feed.id)
+                if let error = feeds.first(where: { $0.id == feed.id })?.lastError { failures.append(error) }
+            }
+            catch { if !Task.isCancelled { failures.append("JSON 列表：\(error.localizedDescription)") } }
         }
+        for warehouse in warehouses {
+            if Task.isCancelled { break }
+            do { try await refresh(id: warehouse.id) }
+            catch { if !Task.isCancelled { failures.append("\(warehouse.name)：\(error.localizedDescription)") } }
+        }
+        lastRefreshErrors = failures
         return failures
     }
 
     func delete(at offsets: IndexSet) {
+        for index in offsets where warehouses.indices.contains(index) { detachFromFeeds(warehouses[index].id) }
         warehouses.remove(atOffsets: offsets)
         do { try save() }
         catch { lastPersistenceError = error.localizedDescription }
@@ -187,16 +211,128 @@ final class WarehouseStore {
         }) {
             warehouses.append(preset)
         }
-        defaultsInstalled = true
         installedPresetVersion = DefaultSubscriptions.version
         do { try save() }
         catch { lastPersistenceError = error.localizedDescription }
     }
 
+    func importOnlineBatch(_ entries: [BatchSubscriptionEntry], allEntries: [BatchSubscriptionEntry],
+                           from url: URL) async throws -> [BatchImportOutcome] {
+        let outcomes = try await importBatch(entries)
+        let oldFeeds = feeds
+        var feed = feeds.first(where: { $0.url == url }) ?? SubscriptionFeed(url: url)
+        let selected = Set(entries.filter { $0.issue == nil }.map(SubscriptionFeed.key))
+        feed.excluded = Set(allEntries.filter { $0.issue == nil }.map(SubscriptionFeed.key)).subtracting(selected)
+        feed.members = feed.members.filter { selected.contains($0.key) }
+        for entry in entries where entry.issue == nil {
+            let key = SubscriptionFeed.key(entry)
+            guard let outcome = outcomes.first(where: { $0.id == entry.id }),
+                  let warehouse = warehouses.first(where: {
+                      $0.kind == entry.kind && $0.configURL.absoluteString == entry.address
+                  }) else { continue }
+            // Do not take ownership of unrelated manual/default subscriptions.
+            if outcome.status == .added || feed.members[key] == warehouse.id { feed.members[key] = warehouse.id }
+            else { feed.excluded.insert(key) }
+        }
+        feed.updatedAt = .now; feed.enabled = true; feed.lastError = nil
+        if let index = feeds.firstIndex(where: { $0.id == feed.id }) { feeds[index] = feed }
+        else { feeds.append(feed) }
+        do { try save() } catch { feeds = oldFeeds; throw error }
+        return outcomes
+    }
+
+    func autoRefreshIfNeeded(now: Date = .now, intervalHours: Int = 6) async {
+        let hours = [1, 6, 12, 24].contains(intervalHours) ? intervalHours : 6
+        guard !Task.isCancelled, !isRefreshingAll,
+              lastAutomaticRefresh.map({ now.timeIntervalSince($0) >= Double(hours) * 3600 }) ?? true else { return }
+        lastAutomaticRefresh = now
+        do { try save() } catch { lastPersistenceError = error.localizedDescription }
+        _ = await refreshAll()
+        if Task.isCancelled { lastAutomaticRefresh = nil; try? save() }
+    }
+
+    func setFeedEnabled(_ id: UUID, enabled: Bool) {
+        guard let index = feeds.firstIndex(where: { $0.id == id }) else { return }
+        let previous = feeds[index]
+        feeds[index].enabled = enabled
+        do { try save() } catch { feeds[index] = previous; lastPersistenceError = error.localizedDescription }
+    }
+
+    func removeFeed(_ id: UUID) {
+        let previous = feeds
+        feeds.removeAll { $0.id == id }
+        do { try save() } catch { feeds = previous; lastPersistenceError = error.localizedDescription }
+    }
+
+    private func detachFromFeeds(_ id: UUID) {
+        for index in feeds.indices {
+            let keys = feeds[index].members.filter { $0.value == id }.map(\.key)
+            for key in keys { feeds[index].members.removeValue(forKey: key); feeds[index].excluded.insert(key) }
+        }
+    }
+
+    func refreshFeed(id: UUID) async throws {
+        guard !refreshingFeedIDs.contains(id), let original = feeds.first(where: { $0.id == id }), original.enabled else { return }
+        refreshingFeedIDs.insert(id)
+        defer { refreshingFeedIDs.remove(id) }
+        do {
+            let entries = try await BatchSubscriptionList().load(from: original.url.absoluteString, client: loader.client)
+            try Task.checkCancellation()
+            // Duplicate names cannot safely identify an endpoint whose URL has changed.
+            let counts = Dictionary(grouping: entries.filter { $0.issue == nil }, by: SubscriptionFeed.key)
+            var failures: [String] = []
+            for entry in entries where entry.issue == nil {
+                try Task.checkCancellation()
+                let key = SubscriptionFeed.key(entry)
+                guard counts[key]?.count == 1 else { failures.append("\(entry.name)：同类型名称重复，未自动更新"); continue }
+                guard let feed = feeds.first(where: { $0.id == id }), feed.enabled else { return }
+                guard !feed.excluded.contains(key), let kind = entry.kind, let url = URL(string: entry.address) else { continue }
+                let memberID = feed.members[key]
+                let old = warehouses.first { $0.id == memberID }
+                if memberID != nil && old == nil { continue }
+                if warehouses.contains(where: { $0.id != memberID && $0.kind == kind && DefaultSubscriptions.matches($0.configURL, url) }) { continue }
+                // Existing unchanged endpoints are refreshed by refreshAll; avoid duplicate requests here.
+                if let old, old.configURL == url { continue }
+                do {
+                    var baseline = old
+                    baseline?.etag = nil; baseline?.lastModified = nil
+                    let loaded = try await loader.load(from: url, kind: kind, name: old?.name ?? entry.name, replacing: baseline)
+                    try Task.checkCancellation()
+                    guard let index = feeds.firstIndex(where: { $0.id == id }), feeds[index].enabled,
+                          !feeds[index].excluded.contains(key), feeds[index].members[key] == memberID else { continue }
+                    if let old {
+                        guard let current = warehouses.first(where: { $0.id == old.id }),
+                              current.configURL == old.configURL, current.name == old.name,
+                              current.updatedAt == old.updatedAt else { continue }
+                    }
+                    guard !warehouses.contains(where: { $0.id != memberID && $0.kind == kind && DefaultSubscriptions.matches($0.configURL, url) }) else { continue }
+                    let previousWarehouses = warehouses, previousFeeds = feeds
+                    if let slot = warehouses.firstIndex(where: { $0.id == loaded.id }) { warehouses[slot] = loaded }
+                    else { warehouses.append(loaded) }
+                    feeds[index].members[key] = loaded.id
+                    do { try save() }
+                    catch { warehouses = previousWarehouses; feeds = previousFeeds; throw error }
+                } catch is CancellationError { throw CancellationError() }
+                catch { failures.append("\(entry.name)：\(error.localizedDescription)") }
+            }
+            guard let index = feeds.firstIndex(where: { $0.id == id }) else { return }
+            feeds[index].updatedAt = .now
+            feeds[index].lastError = failures.isEmpty ? nil : failures.joined(separator: "\n")
+            try save()
+            if !failures.isEmpty { lastRefreshErrors = failures }
+        } catch {
+            if !Task.isCancelled, let index = feeds.firstIndex(where: { $0.id == id }) {
+                feeds[index].lastError = error.localizedDescription
+                try? save()
+            }
+            throw error
+        }
+    }
+
     func clearPersistenceError() { lastPersistenceError = nil }
 
     private func save() throws {
-        let data = try JSONEncoder().encode(Snapshot(warehouses: warehouses, defaultsInstalled: defaultsInstalled, installedPresetVersion: installedPresetVersion))
+        let data = try JSONEncoder().encode(Snapshot(warehouses: warehouses, defaultsInstalled: nil, installedPresetVersion: installedPresetVersion, feeds: feeds, lastAutomaticRefresh: lastAutomaticRefresh))
         try FileManager.default.createDirectory(at: storageURL.deletingLastPathComponent(),
                                                 withIntermediateDirectories: true)
         try data.write(to: storageURL, options: .atomic)
@@ -208,8 +344,9 @@ final class WarehouseStore {
             let data = try Data(contentsOf: storageURL)
             if let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data) {
                 warehouses = snapshot.warehouses
-                defaultsInstalled = snapshot.defaultsInstalled
-                installedPresetVersion = snapshot.installedPresetVersion ?? (defaultsInstalled ? 1 : 0)
+                feeds = snapshot.feeds ?? []
+                lastAutomaticRefresh = snapshot.lastAutomaticRefresh
+                installedPresetVersion = snapshot.installedPresetVersion ?? (snapshot.defaultsInstalled == true ? 1 : 0)
             } else {
                 // Preserve subscriptions saved before default presets were introduced.
                 warehouses = try JSONDecoder().decode([Warehouse].self, from: data)

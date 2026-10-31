@@ -8,7 +8,7 @@ final class TVBoxConfigTests: XCTestCase {
           // A disabled source must not be imported.
           // {"key":"disabled","api":"csp_Disabled","type":3},
           "sites": [{"key":"spider","api":"csp_Demo","type":3,
-            "ext":"https://example.com/a//b?value=/*keep*/",},],
+            "name":"https://example.com/a//b?value=/*keep*/",},],
           /* other settings */ "lives": [],
         }
         """#
@@ -17,13 +17,22 @@ final class TVBoxConfigTests: XCTestCase {
         let config = try TVBoxConfigDecoder().decode(wrapped)
         XCTAssertEqual(config.sites.map(\.key), ["spider"])
         XCTAssertEqual(config.sites.first?.runtime, .gatewayRequired)
-        XCTAssertEqual(config.sites.first?.ext, .string("https://example.com/a//b?value=/*keep*/"))
+        XCTAssertEqual(config.sites.first?.name, "https://example.com/a//b?value=/*keep*/")
     }
 
     func testDecoderPreservesEscapedStringsAndBOM() throws {
-        let json = #"{"sites":[{"key":"a","type":1,"api":"https://example.com/api","ext":"quote: \" // text"}]}"#
+        let json = #"{"sites":[{"key":"a","type":1,"api":"https://example.com/api","name":"quote: \" // text"}]}"#
         let config = try TVBoxConfigDecoder().decode(Data(("\u{FEFF}" + json).utf8))
-        XCTAssertEqual(config.sites.first?.ext, .string("quote: \" // text"))
+        XCTAssertEqual(config.sites.first?.name, "quote: \" // text")
+    }
+
+    func testUnusedTVBoxMetadataIsIgnoredWhilePlayableSourcesRoundTrip() throws {
+        let json = #"{"spider":"unused.jar","parses":[{"name":"parser","url":"https://example.com/parse"}],"sites":[{"key":"cms","type":1,"api":"https://example.com/api","ext":{"unused":true},"quickSearch":1}],"lives":[{"name":"频道","type":0,"url":"https://example.com/live.m3u","epg":"https://example.com/epg?name={name}"}]}"#
+        let decoded = try TVBoxConfigDecoder().decode(Data(json.utf8))
+        let restored = try JSONDecoder().decode(TVBoxConfig.self, from: JSONEncoder().encode(decoded))
+        XCTAssertEqual(restored.sites.first?.runtime, .nativeAPI)
+        XCTAssertEqual(restored.sites.first?.api, "https://example.com/api")
+        XCTAssertEqual(restored.lives.first?.epg, "https://example.com/epg?name={name}")
     }
 
     func testDecoderRejectsHTMLBrokenWrappersAndUnterminatedComments() {

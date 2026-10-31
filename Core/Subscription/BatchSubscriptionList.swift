@@ -79,6 +79,7 @@ struct BatchSubscriptionList {
     func load(from text: String, client: any HTTPDataLoading = BoundedHTTPClient()) async throws -> [BatchSubscriptionEntry] {
         var request = URLRequest(url: try Self.downloadURL(text))
         request.timeoutInterval = 20
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         let (data, _) = try await client.data(for: request, maximumBytes: Self.maximumBytes)
         return try decode(data)
     }

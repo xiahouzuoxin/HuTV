@@ -38,6 +38,8 @@ struct PlaybackTransportControls: View {
     var canPrevious: Bool
     var canNext: Bool
     @Binding var playbackRate: Double
+    var episodeStart: Double = 0
+    var onSetEpisodeStart: ((Double) -> Void)? = nil
     @State private var editing = false
     @State private var preview = 0.0
     private var total: Double { controller.duration.isFinite && controller.duration > 0 ? controller.duration : 1 }
@@ -49,6 +51,34 @@ struct PlaybackTransportControls: View {
                     Text("已缓冲至 " + time(min(total, current + controller.bufferedAhead)))
                 } else if controller.isBuffering { Text("缓冲中…") }
                 Spacer()
+                if let onSetEpisodeStart {
+                    Text(episodeStart > 0 ? time(episodeStart) : "起播")
+                        .padding(.horizontal, 6).frame(minHeight: 32)
+                        .contentShape(Rectangle())
+                        .gesture(LongPressGesture(minimumDuration: 0.6)
+                            .exclusively(before: TapGesture())
+                            .onEnded { value in
+                                interaction(.activity)
+                                switch value {
+                                case .first(true): onSetEpisodeStart(0)
+                                case .second:
+                                    if controller.canSeek { onSetEpisodeStart(controller.position) }
+                                default: break
+                                }
+                            })
+                        .opacity(controller.canSeek || episodeStart > 0 ? 1 : 0.4)
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityLabel("本剧起播位置，当前 \(time(episodeStart))")
+                        .accessibilityHint("点击记录当前进度，长按直接清除")
+                        .accessibilityAction {
+                            interaction(.activity)
+                            if controller.canSeek { onSetEpisodeStart(controller.position) }
+                        }
+                        .accessibilityAction(named: "清除起播位置") {
+                            interaction(.activity)
+                            onSetEpisodeStart(0)
+                        }
+                }
                 Menu {
                     Button {
                         interaction(.activity)

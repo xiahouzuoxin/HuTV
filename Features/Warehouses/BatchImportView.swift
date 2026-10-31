@@ -10,6 +10,8 @@ struct BatchImportView: View {
     @Environment(WarehouseStore.self) private var store
     @State private var mode = InputMode.link
     @State private var link = ""
+    @State private var followLink = true
+    @State private var previewURL: URL?
     @State private var text = ""
     @State private var fileData: Data?
     @State private var fileName = ""
@@ -38,6 +40,11 @@ struct BatchImportView: View {
                             .accessibilityLabel("JSON 订阅列表")
                     case .file:
                         Button(fileName.isEmpty ? "选择 JSON 文件" : fileName) { choosingFile = true }
+                    }
+                    if mode == .link {
+                        Toggle("跟随链接更新订阅", isOn: $followLink)
+                        Text("自动刷新默认关闭，开关和间隔可在设置中调整，也可手动刷新。新增项会自动验证并添加，同名同类型项更新地址；取消勾选、手动删除或编辑的项不会被覆盖。")
+                            .font(.footnote).foregroundStyle(.secondary)
                     }
                     Text("数组中每项使用 name 和 api（或 url）。可选 kind：cms、live、tvbox。未填类型时，M3U/TXT 地址识别为直播，其他地址按点播 API 验证。支持注释、尾逗号；最多 200 项、5 MB。")
                         .font(.footnote).foregroundStyle(.secondary)
@@ -124,7 +131,7 @@ struct BatchImportView: View {
         case .file: fileData != nil
         }
     }
-    private func resetPreview() { entries = nil; selected = []; outcomes = nil; errorMessage = nil }
+    private func resetPreview() { previewURL = nil; entries = nil; selected = []; outcomes = nil; errorMessage = nil }
 
     private func readList() {
         busy = true; resetPreview()
@@ -134,7 +141,10 @@ struct BatchImportView: View {
                 let reader = BatchSubscriptionList()
                 let loaded: [BatchSubscriptionEntry]
                 switch mode {
-                case .link: loaded = try await reader.load(from: link)
+                case .link:
+                    let url = try BatchSubscriptionList.downloadURL(link)
+                    loaded = try await reader.load(from: url.absoluteString)
+                    previewURL = url
                 case .text: loaded = try reader.decode(Data(text.utf8))
                 case .file: loaded = try reader.decode(fileData ?? Data())
                 }
@@ -150,7 +160,11 @@ struct BatchImportView: View {
         let chosen = entries.filter { selected.contains($0.id) || $0.issue != nil }
         operation = Task { @MainActor in
             defer { busy = false }
-            do { outcomes = try await store.importBatch(chosen) }
+            do {
+                if followLink, let previewURL {
+                    outcomes = try await store.importOnlineBatch(chosen, allEntries: entries, from: previewURL)
+                } else { outcomes = try await store.importBatch(chosen) }
+            }
             catch { if !Task.isCancelled { errorMessage = error.localizedDescription } }
         }
     }

@@ -1,4 +1,3 @@
-import AVKit
 import SwiftUI
 
 struct LivePlayerView: View {

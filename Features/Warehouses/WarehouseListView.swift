@@ -9,6 +9,12 @@ struct WarehouseListView: View {
 
     var body: some View {
         List {
+            if !store.feeds.isEmpty {
+                Section {
+                    NavigationLink("在线 JSON 列表（\(store.feeds.count)）") { SubscriptionFeedsView() }
+                }
+            }
+            if store.isRefreshingAll { ProgressView("正在更新订阅…") }
             if store.warehouses.isEmpty {
                 ContentUnavailableView(
                     "还没有订阅",
@@ -44,10 +50,7 @@ struct WarehouseListView: View {
         }
         .sheet(item: $editingSubscription) { EditSubscriptionView(warehouse: $0) }
         .sheet(isPresented: $showingImporter) { ImportSubscriptionView() }
-        .refreshable {
-            let failures = await store.refreshAll()
-            if !failures.isEmpty { refreshError = failures.joined(separator: "\n") }
-        }
+        .refreshable { await refreshAll() }
         .alert("刷新失败", isPresented: Binding(
             get: { refreshError != nil }, set: { if !$0 { refreshError = nil } }
         )) { Button("好") {} } message: { Text(refreshError ?? "") }
@@ -127,6 +130,12 @@ struct WarehouseListView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
+    }
+
+    @MainActor private func refreshAll() async {
+        refreshError = nil
+        let failures = await store.refreshAll()
+        if !failures.isEmpty { refreshError = failures.joined(separator: "\n") }
     }
 
     @MainActor private func refresh(_ id: UUID) async {

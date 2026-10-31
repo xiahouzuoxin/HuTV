@@ -111,6 +111,48 @@ final class PlaybackQualityTests: XCTestCase {
         XCTAssertTrue(controller.qualityOptions.isEmpty)
         XCTAssertEqual(controller.qualityLabel, "自动")
     }
+    @MainActor func testPausedAVSeekStaysPausedAndCanResume() async throws {
+        let url = try XCTUnwrap(Bundle(for: Self.self).resourceURL?.appendingPathComponent("Fixtures/Quality/pause-controls.mp4"))
+        let controller = PlaybackController()
+        let task = Task {
+            await controller.start(resource: PlaybackResource(url: url), position: 0, buffer: 0,
+                                   onProgress: nil, onEnded: nil)
+        }
+        defer { controller.stop(); task.cancel() }
+        for _ in 0..<100 {
+            if controller.ready { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertTrue(controller.ready)
+        controller.togglePlay()
+        XCTAssertTrue(controller.isPaused)
+        await controller.seek(to: 10)
+        XCTAssertNil(controller.errorMessage)
+        XCTAssertEqual(controller.position, 10, accuracy: 1)
+        XCTAssertEqual(controller.player?.rate, 0)
+        await controller.seek(to: controller.position - 10)
+        XCTAssertEqual(controller.position, 0, accuracy: 1)
+        controller.togglePlay()
+        XCTAssertFalse(controller.isPaused)
+    }
+
+    @MainActor func testStartBeyondEpisodeDurationFallsBackToBeginning() async throws {
+        let url = try XCTUnwrap(Bundle(for: Self.self).resourceURL?.appendingPathComponent("Fixtures/Quality/pause-controls.mp4"))
+        let controller = PlaybackController()
+        let task = Task {
+            await controller.start(resource: PlaybackResource(url: url), position: 120, buffer: 0,
+                                   onProgress: nil, onEnded: nil)
+        }
+        defer { controller.stop(); task.cancel() }
+        for _ in 0..<100 {
+            if controller.ready || controller.errorMessage != nil { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertTrue(controller.ready)
+        XCTAssertNil(controller.errorMessage)
+        XCTAssertLessThan(controller.position, 5)
+    }
+
     @MainActor func testVLCUsesRealVideoTracksAndRestoresDefault() async throws {
         let url = try XCTUnwrap(Bundle(for: Self.self).resourceURL?.appendingPathComponent("Fixtures/Quality/multi.mkv"))
         let controller = PlaybackController()

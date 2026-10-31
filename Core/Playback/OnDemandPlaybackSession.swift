@@ -12,13 +12,16 @@ final class OnDemandPlaybackSession {
     private(set) var startPosition: Double
     private(set) var position: Double
     private(set) var duration = 0.0
+    private(set) var episodeStart: Double
 
-    init(item: MediaItem, source: TVBoxSite, episodes: [MediaEpisode], selected: MediaEpisode, position: Double) {
+    init(item: MediaItem, source: TVBoxSite, episodes: [MediaEpisode], selected: MediaEpisode, position: Double, episodeStart: Double = 0) {
         self.item = item; self.source = source; allEpisodes = episodes
         queue = EpisodeQueue(episodes: episodes, selected: selected)
         let initialPosition = position.isFinite ? max(0, position) : 0
-        startPosition = initialPosition
-        self.position = initialPosition
+        let opening = Self.validStart(episodeStart)
+        self.episodeStart = opening
+        startPosition = max(initialPosition, opening)
+        self.position = max(initialPosition, opening)
     }
 
     func acceptProgress(_ position: Double, duration: Double, revision: UUID) -> Bool {
@@ -28,8 +31,9 @@ final class OnDemandPlaybackSession {
         return true
     }
 
-    func select(item: MediaItem, source: TVBoxSite, episodes: [MediaEpisode], episode: MediaEpisode, keepPosition: Bool) {
-        startPosition = keepPosition ? position : 0
+    func select(item: MediaItem, source: TVBoxSite, episodes: [MediaEpisode], episode: MediaEpisode, keepPosition: Bool, episodeStart: Double = 0) {
+        self.episodeStart = Self.validStart(episodeStart)
+        startPosition = keepPosition ? max(position, self.episodeStart) : self.episodeStart
         position = startPosition; duration = 0
         self.item = item; self.source = source; allEpisodes = episodes
         queue = EpisodeQueue(episodes: episodes, selected: episode)
@@ -46,7 +50,12 @@ final class OnDemandPlaybackSession {
         resetEpisodePosition(); return true
     }
 
+    func setEpisodeStart(_ seconds: Double) { episodeStart = Self.validStart(seconds) }
+    private static func validStart(_ value: Double) -> Double {
+        value.isFinite ? min(86_400, max(0, value.rounded(.down))) : 0
+    }
+
     private func resetEpisodePosition() {
-        startPosition = 0; position = 0; duration = 0; revision = UUID()
+        startPosition = episodeStart; position = episodeStart; duration = 0; revision = UUID()
     }
 }

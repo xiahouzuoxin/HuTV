@@ -1,6 +1,6 @@
 # HuTV 签名到期与 Mac / Windows 刷新指南
 
-核对日期：2026-10-30。本文提供操作方法，不代表已在你的电脑配置自动任务；本项目也没有集成、安装或验证下述第三方刷新工具。当前 HuTV 可通过 Mac 上的 Xcode 构建安装。
+核对日期：2026-10-31。HuTV 支持 Xcode 真机安装，也提供供 Sideloadly 重新签名的 arm64 IPA 打包脚本。脚本不登录 Apple ID、不执行签名或配置自动续签；这些由签名工具完成。
 
 ## 1. 为什么会过期
 
@@ -81,10 +81,13 @@ PY
 
 1. 安装并打开官方 Sideloadly，USB 连接已解锁的 iPad，确认信任。
 2. 若需要无线刷新，在 Finder 选择 iPad → 通用 → 勾选“接入 Wi-Fi 时显示此 iPad”，应用设置。
-3. 导入完整 `HuTV.ipa`，选择这台 iPad，使用原签名 Apple ID。核对最终 Bundle ID，保留默认签名模式，不添加注入插件。
+3. 运行[打包脚本](#7-构建供侧载使用的-ipa)，导入唯一输出 `output/HuTV.ipa`，选择这台 iPad，使用原签名 Apple ID。核对最终 Bundle ID，保留默认签名模式，不添加注入插件。
 4. 在这次侧载时启用 Automatic Refresh / 自动刷新，完成第一次签名安装。只有通过 Xcode 安装过，并不会自动成为 Sideloadly 管理的任务。
 5. 允许其后台刷新组件按需启动，在菜单栏检查 HuTV 已列入受管理应用。系统若提供登录项/后台活动设置，确认没有禁用相应组件。
 6. 保持电脑在线、用户已登录且未睡眠；无线时与 iPad 处于可互相发现的局域网。首次测试保持 iPad 解锁亮屏。
+7. 首次使用新签名账号时，在 iPad「设置 → 通用 → VPN 与设备管理」中信任对应开发者，再打开 HuTV 验证播放。
+
+Xcode 登录账号不会自动同步到 Sideloadly，需在 Sideloadly 单独登录。主窗口可以关闭，但退出菜单栏的 Daemon 会停止自动续签；Mac 重启后确认后台组件已重新运行。配置 Wi-Fi 后可以拔掉 USB，先确认 Sideloadly 本身能发现设备，再手动刷新一次验证整条流程。仅 Xcode 能无线发现设备，不代表 Sideloadly 的无线刷新已经验证成功。
 
 ### 5.2 Windows 设置
 
@@ -104,7 +107,13 @@ Wi-Fi 同步入口及无线检测条件参见 [Sideloadly FAQ](https://sideloadl
 
 ### 5.4 接管新版本与已过期 App
 
-更新 HuTV 时向同一工具重新导入新 IPA，使用原账号和应用标识，并保持自动刷新开启。只更新电脑某处的 IPA 文件不会自动更新 Daemon 已缓存的包。[更新已登记应用](https://sideloadly.io/faq.html)
+日常续签使用 Daemon 保存的 IPA，无需运行构建脚本。更新 HuTV 时：
+
+1. 运行 `./scripts/package-ipa.sh`，确认成功输出校验结果；若失败，不要使用目录中可能残留的上一次产物。
+2. 把本次 `output/HuTV.ipa` 拖入 Sideloadly，确认界面显示选中了它。沿用同一 Apple ID 和最终 Bundle ID，保持自动刷新开启，再完成签名安装。
+3. 检查 HuTV 仍在自动刷新列表内；从菜单栏 / 托盘手动刷新一次，验证缓存包也能正常签名安装。安装成功后打开 App 检查播放与本机数据。
+
+只替换磁盘上的同名文件或重试旧任务，不会更新 Daemon 已缓存的包。不要手动修改其数据库或直接替换缓存文件。[更新已登记应用](https://sideloadly.io/faq.html)
 
 若已过期，先用 USB 连接并解锁设备，通过相同工具、相同标识覆盖安装，成功后重新核对自动刷新任务；不要先卸载来“清理”。
 
@@ -117,33 +126,37 @@ Wi-Fi 同步入口及无线检测条件参见 [Sideloadly FAQ](https://sideloadl
 - 手动确认：iPad 打开 AltStore → My Apps → Refresh All，检查 HuTV 和 AltStore 自身剩余有效期。
 - 免费账号的可同时安装侧载 App 数有限，AltStore 自身也占名额；后台唤醒由系统调度，不保证固定时刻执行。
 
-若工具本身已过期，先用 AltServer 恢复 AltStore，再按官方故障排查恢复 HuTV。跨工具接管同样先核对标识和备份。此前 SideStore 已放弃并卸载；本文不需要重新安装 SideStore、LocalDevVPN 或任何配套 VPN。
+若工具本身已过期，先用 AltServer 恢复 AltStore，再按官方故障排查恢复 HuTV。跨工具接管同样先核对标识和备份。Sideloadly 路线不需要安装 SideStore 或 LocalDevVPN。
 
-## 7. Windows 所需 IPA 从哪里来
+## 7. 构建供侧载使用的 IPA
 
-本项目代码无法直接在 Windows 本机构建 iOS 包。可以从自己信任的 Mac 构建环境导出 IPA，或让维护者提供同版本 IPA。不要把模拟器 `.app`、仅改后缀的 ZIP、缺少 VLC 的包当作 iPad 安装包。
-
-Mac 上可生成一个供侧载工具重新签名的未签名真机 IPA；它本身不能直接安装。以下从仓库根目录执行，输出被 `.gitignore` 忽略：
+在安装了 Xcode、XcodeGen、Python 3 的 Mac 上，从工程根目录执行：
 
 ```sh
-./scripts/fetch-vlckit.sh
-xcodegen generate
-xcodebuild -project HuTV.xcodeproj -scheme HuTV \
-  -configuration Release -destination 'generic/platform=iOS' \
-  -derivedDataPath DerivedData CODE_SIGNING_ALLOWED=NO build
-
-# 每次使用新建目录，避免旧 Payload 混入本次打包。
-mkdir -p output
-HUTV_PACKAGE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/HuTV-ipa.XXXXXX")
-mkdir "$HUTV_PACKAGE_DIR/Payload"
-ditto 'DerivedData/Build/Products/Release-iphoneos/HuTV.app' \
-  "$HUTV_PACKAGE_DIR/Payload/HuTV.app"
-# 应包含 Frameworks/MobileVLCKit.framework。
-test -d "$HUTV_PACKAGE_DIR/Payload/HuTV.app/Frameworks/MobileVLCKit.framework"
-ditto -c -k --keepParent "$HUTV_PACKAGE_DIR/Payload" output/HuTV.ipa
+./scripts/package-ipa.sh
 ```
 
-以上命令逐步执行，任何一步失败都应停止。生成后检查 ZIP 顶层为 `Payload/HuTV.app/`，再传输到 Windows，由签名工具签名主 App 及嵌入框架。临时打包目录不含账户凭据，但有构建副本，用完可自行删除。本文未实机验证 Sideloadly 对当前 HuTV/VLC 包的接管流程，首次必须验证启动和播放。
+需要沿用已有 App 包标识时：
+
+```sh
+HUTV_BUNDLE_ID=com.yourname.HuTV ./scripts/package-ipa.sh
+```
+
+示例标识需替换为自己已有的值；不传时使用 `project.yml` 的配置。Sideloadly 可能调整最终标识，覆盖安装时还需核对工具中的设置。Windows 使用 Mac 生成的同一 IPA，不在 Windows 编译 iOS 工程。
+
+脚本位于 [`scripts/package-ipa.sh`](../scripts/package-ipa.sh)，执行以下步骤：
+
+1. 准备官方 VLC 依赖、使用 XcodeGen 生成工程，以 Release / iPhoneOS / arm64 构建，关闭构建签名，不读取账号凭据。
+2. 将 App 复制到临时目录，逐个检查 Mach-O 可执行文件；VLC 等多架构二进制只保留 arm64。
+3. 清除临时副本中的代码签名、签名目录、描述文件和扩展属性，不修改 Vendor 中的原始框架。
+4. 校验 IPA 压缩数据、目录结构、真机平台、arm64 架构、主程序和 VLC 是否齐全，以及是否残留签名或加密标记。
+5. 通过后替换唯一安装包 `output/HuTV.ipa`，同时写出 `output/HuTV.ipa.sha256`；构建日志为 `output/package-ipa.log`。这些产物均不入库。
+
+可在输出目录运行 `shasum -a 256 -c HuTV.ipa.sha256` 检查传输后的文件完整性。包名固定便于选择，SHA-256 用于区分内容；文件同名不意味着 Sideloadly 缓存已更新。
+
+脚本遇错立即停止并清理临时目录；上一次已生成的 IPA 可能仍在，只有看到本次 `Ready` 提示才能将其作为本次产物。并发运行会被锁阻止；若进程被强制杀死留下 `output/.package-ipa.lock`，先确认没有打包进程运行，再删除这个空锁目录重试。
+
+此 IPA 是未签名的侧载输入包，不能直接通过设备安装命令安装，也不是 App Store 上传归档。归档校验不能替代 Sideloadly 的签名校验和真机启动、播放测试。每次发布新包后，按第 5.4 节重新登记缓存并验证刷新。
 
 ## 8. 常见失败与检查顺序
 
@@ -157,6 +170,7 @@ ditto -c -k --keepParent "$HUTV_PACKAGE_DIR/Payload" output/HuTV.ipa
 | 需要重新登录/验证码 | 自动任务不能绕过认证，手动完成后再次验证刷新 |
 | 提示安装名额/App ID 限额 | 免费团队有限额；不要随意换 Bundle ID 创建更多 App ID，优先检查现有安装 |
 | 多出第二个 HuTV、历史为空 | 最终 Bundle ID 或团队改变；原 App 先保留，从备份或原安装恢复，切勿继续删改 |
+| 安装或续签提示 `ApplicationVerificationFailed`，指向 `MobileVLCKit.framework` / `0xe8008001` | 用脚本重新生成干净 arm64 包，重新导入并开启自动刷新后安装；若手动安装成功而自动刷新仍失败，核对是否缓存了旧包，重试旧任务不会替换缓存；若仍失败，保留完整错误继续排查签名 |
 | 安装后立刻闪退 | 检查主 App 和 VLC 框架签名、框架是否完整；区分签名失败与播放器自身故障 |
 
 ## 9. 账号与自动化边界

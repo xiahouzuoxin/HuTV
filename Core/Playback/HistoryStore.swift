@@ -47,11 +47,13 @@ final class HistoryStore {
     private(set) var searches: [String] = []
     private(set) var records: [WatchRecord] = []
     private(set) var persistenceError: String?
+    private(set) var episodeStarts: [String: Double] = [:]
     private let storageURL: URL
 
     private struct Snapshot: Codable {
         var searches: [String]
         var records: [WatchRecord]
+        var episodeStarts: [String: Double]?
     }
 
     init(storageURL: URL? = nil) {
@@ -62,6 +64,7 @@ final class HistoryStore {
                 let snapshot = try JSONDecoder().decode(Snapshot.self, from: Data(contentsOf: self.storageURL))
                 searches = snapshot.searches
                 records = snapshot.records
+                episodeStarts = snapshot.episodeStarts ?? [:]
             } catch { persistenceError = "读取历史失败：\(error.localizedDescription)" }
         }
     }
@@ -93,6 +96,18 @@ final class HistoryStore {
         }
     }
 
+    private func seriesKey(_ item: MediaItem) -> String {
+        // JSON array encoding avoids separator collisions in source/detail identifiers.
+        String(data: try! JSONEncoder().encode([item.sourceID, item.detailID]), encoding: .utf8)!
+    }
+    func episodeStart(for item: MediaItem) -> Double { episodeStarts[seriesKey(item)] ?? 0 }
+    func setEpisodeStart(_ seconds: Double, for item: MediaItem) {
+        guard seconds.isFinite, seconds >= 0 else { return }
+        if seconds < 1 { episodeStarts.removeValue(forKey: seriesKey(item)) }
+        else { episodeStarts[seriesKey(item)] = min(seconds.rounded(.down), 86_400) }
+        save()
+    }
+
     func removeRecord(_ id: String) { records.removeAll { $0.id == id }; save() }
     func clearRecords() { records = []; save() }
     func clearError() { persistenceError = nil }
@@ -101,7 +116,7 @@ final class HistoryStore {
         do {
             try FileManager.default.createDirectory(at: storageURL.deletingLastPathComponent(),
                                                     withIntermediateDirectories: true)
-            try JSONEncoder().encode(Snapshot(searches: searches, records: records))
+            try JSONEncoder().encode(Snapshot(searches: searches, records: records, episodeStarts: episodeStarts))
                 .write(to: storageURL, options: .atomic)
         } catch { persistenceError = "保存历史失败：\(error.localizedDescription)" }
     }

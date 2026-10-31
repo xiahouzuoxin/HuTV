@@ -8,6 +8,7 @@ final class PlaybackController: ObservableObject {
     @Published private(set) var player: AVPlayer?
     @Published private(set) var vlcPlayer: VLCMediaPlayer?
     let vlcDrawable = UIView()
+    @Published private(set) var isPaused = false
     @Published private(set) var ready = false
     @Published private(set) var isBuffering = true
     @Published private(set) var bufferedAhead = 0.0
@@ -131,7 +132,9 @@ final class PlaybackController: ObservableObject {
         }
         if position.isFinite && position > 0 {
             playback.pause()
-            let restored = await performSeek(position, player: playback, item: item)
+            let length = item.duration.seconds
+            let target = length.isFinite && length > 0 && position >= length - 1 ? 0 : position
+            let restored = await performSeek(target, player: playback, item: item)
             guard generation == run, !Task.isCancelled else { return }
             guard restored else {
                 fail("无法恢复上次进度，请重试或从头播放。", player: playback)
@@ -147,6 +150,7 @@ final class PlaybackController: ObservableObject {
         while generation == run, !Task.isCancelled {
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
             guard generation == run, !Task.isCancelled else { return }
+            isPaused = ready && playback.timeControlStatus == .paused && !reportedEnd
             updateAwake(playback.timeControlStatus != .paused)
             isBuffering = playback.timeControlStatus == .waitingToPlayAtSpecifiedRate || seeking
             let current = playback.currentTime().seconds
@@ -195,6 +199,7 @@ final class PlaybackController: ObservableObject {
         asset = nil
         player = nil
         ready = false
+        isPaused = false
         bufferedRanges = []
         bufferedAhead = 0
         updateAwake(false)
@@ -228,8 +233,16 @@ final class PlaybackController: ObservableObject {
     var canSeek: Bool { ready && duration.isFinite && duration > 0 && (vlcPlayer?.isSeekable ?? true) }
     var isPlaying: Bool { vlcPlayer?.isPlaying ?? (player?.timeControlStatus == .playing) }
     func togglePlay() {
-        if let vlcPlayer { vlcPlayer.isPlaying ? vlcPlayer.pause() : vlcPlayer.play() }
-        else if let player { player.timeControlStatus == .paused ? player.play() : player.pause() }
+        guard ready, errorMessage == nil else { return }
+        if let vlcPlayer {
+            isPaused.toggle()
+            isPaused ? vlcPlayer.pause() : vlcPlayer.play()
+        } else if let player {
+            isPaused = player.timeControlStatus != .paused
+            isPaused ? player.pause() : player.play()
+        }
+        updateAwake(!isPaused)
+        saveProgress()
     }
     func setVolume(_ value: Double) {
         player?.volume = Float(value)
@@ -384,6 +397,7 @@ extension PlaybackController {
         while generation == run, !Task.isCancelled {
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
             guard generation == run, !Task.isCancelled else { return }
+            isPaused = ready && playback.state == .paused && !reportedEnd
             switch playback.state {
             case .error:
                 saveProgress()
@@ -406,10 +420,12 @@ extension PlaybackController {
             let mediaTime = Double(playback.time.intValue) / 1000
             // libVLC 3 can retain the buffering state after actual output has started.
             if playback.state == .playing || (playback.isPlaying && mediaTime > 0) {
-                if !ready && position > 1 && mediaTime < position - 1 {
+                let length = Double(media.length.intValue) / 1000
+                let target = length > 0 && position >= length - 1 ? 0 : position
+                if !ready && target > 1 && mediaTime < target - 1 {
                     if restoreDeadline == nil { restoreDeadline = ContinuousClock.now.advanced(by: .seconds(15)) }
                     if !restoreRequested && playback.isSeekable {
-                        playback.time = VLCTime(int: Int32(position * 1000))
+                        playback.time = VLCTime(int: Int32(min(target, Double(Int32.max) / 1000) * 1000))
                         restoreRequested = true
                     }
                     if let restoreDeadline, ContinuousClock.now >= restoreDeadline {

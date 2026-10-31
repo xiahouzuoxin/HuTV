@@ -93,7 +93,7 @@ struct MediaDetailView: View {
             get: { playbackError != nil }, set: { if !$0 { playbackError = nil } }
         )) { Button("好") {} } message: { Text(playbackError ?? "") }
         .fullScreenCover(item: $playingResource) { value in
-            OnDemandPlayerView(item: item, source: provider.source, session: value)
+            OnDemandPlayerView(item: item, source: provider.source, session: value, episodeStart: history.episodeStart(for: item))
         }
     }
 
@@ -152,9 +152,9 @@ private struct OnDemandPlayerView: View {
     @State private var finished = false
     @State private var showingSourcePicker = false
 
-    init(item: MediaItem, source: TVBoxSite, session: IdentifiedPlaybackResource) {
+    init(item: MediaItem, source: TVBoxSite, session: IdentifiedPlaybackResource, episodeStart: Double) {
         _playback = State(initialValue: OnDemandPlaybackSession(item: item, source: source,
-            episodes: session.episodes, selected: session.episode, position: session.startPosition))
+            episodes: session.episodes, selected: session.episode, position: session.startPosition, episodeStart: episodeStart))
     }
 
     var body: some View {
@@ -182,7 +182,12 @@ private struct OnDemandPlayerView: View {
                     },
                     onPrevious: { if playback.revision == run { retreat(before: episode.id) } },
                     onNext: { if playback.revision == run { advance(after: episode.id) } },
-                    canPrevious: playback.queue.hasPrevious, canNext: playback.queue.hasNext)
+                    canPrevious: playback.queue.hasPrevious, canNext: playback.queue.hasNext,
+                    episodeStart: playback.episodeStart,
+                    onSetEpisodeStart: { seconds in
+                        history.setEpisodeStart(seconds, for: playback.item)
+                        playback.setEpisodeStart(history.episodeStart(for: playback.item))
+                    })
                     .id(run)
             } else {
                 Text("此集需要额外解析，请切换线路。")
@@ -197,7 +202,8 @@ private struct OnDemandPlayerView: View {
                 history.record(.vod(item: playback.item, source: playback.source, episode: playback.queue.current),
                                position: playback.position, duration: playback.duration)
                 playback.select(item: selection.item, source: selection.source, episodes: selection.episodes,
-                                episode: selection.episode, keepPosition: selection.keepPosition)
+                                episode: selection.episode, keepPosition: selection.keepPosition,
+                                episodeStart: history.episodeStart(for: selection.item))
                 finished = false
                 showingSourcePicker = false
             }

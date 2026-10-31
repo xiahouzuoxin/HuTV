@@ -2,6 +2,8 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(WarehouseStore.self) private var store
+    @AppStorage("subscriptions.autoRefresh") private var autoRefresh = false
+    @AppStorage("subscriptions.refreshHours") private var refreshHours = 6
     @State private var defaultsAdded = false
     @AppStorage("playback.engine") private var engine: PlaybackEngine = .avPlayer
     @AppStorage("playback.autoAdvance") private var autoAdvance = true
@@ -28,6 +30,25 @@ struct SettingsView: View {
                 }
                 Text("AVPlayer 使用所选前向缓冲目标；VLC 使用最多 3 秒网络缓冲，避免开播等待过长。实际效果取决于视频源。")
                     .font(.footnote).foregroundStyle(.secondary)
+            }
+            Section("订阅更新") {
+                Toggle("自动刷新订阅", isOn: $autoRefresh)
+                if autoRefresh {
+                    Picker("刷新间隔", selection: $refreshHours) {
+                        ForEach([1, 6, 12, 24], id: \.self) { hours in
+                            Text("\(hours) 小时").tag(hours)
+                        }
+                    }
+                }
+                Text(autoRefresh
+                     ? "仅在 App 前台按所选间隔自动刷新。在线 JSON 列表需开启跟随链接；本地文件和粘贴内容不会自动更新。"
+                     : "自动刷新已关闭。可在订阅页下拉，手动更新订阅和跟随的 JSON 列表。")
+                    .font(.footnote).foregroundStyle(.secondary)
+                NavigationLink("在线 JSON 列表（\(store.feeds.count)）") { SubscriptionFeedsView() }
+                if !store.lastRefreshErrors.isEmpty {
+                    Text("部分订阅更新失败，可在订阅页下拉重试。原有内容已保留。")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
             }
             Section("默认订阅源") {
                 Button("添加缺少的默认源") {

@@ -2,11 +2,9 @@ import Foundation
 
 struct TVBoxConfig: Codable, Sendable {
     var sites: [TVBoxSite] = []
-    var parses: [TVBoxParse] = []
     var lives: [TVBoxLive] = []
-    var spider: String?
 
-    enum CodingKeys: String, CodingKey { case sites, parses, lives, spider }
+    enum CodingKeys: String, CodingKey { case sites, lives }
 
     init(sites: [TVBoxSite] = [], lives: [TVBoxLive] = []) {
         self.sites = sites
@@ -16,9 +14,7 @@ struct TVBoxConfig: Codable, Sendable {
     init(from decoder: Decoder) throws {
         let box = try decoder.container(keyedBy: CodingKeys.self)
         sites = (try? box.decode(LossyArray<TVBoxSite>.self, forKey: .sites).elements) ?? []
-        parses = (try? box.decode(LossyArray<TVBoxParse>.self, forKey: .parses).elements) ?? []
         lives = (try? box.decode(LossyArray<TVBoxLive>.self, forKey: .lives).elements) ?? []
-        spider = box.decodeFlexibleStringIfPresent(forKey: .spider)
     }
 }
 
@@ -27,13 +23,9 @@ struct TVBoxSite: Codable, Identifiable, Hashable, Sendable {
     var name: String
     var type: Int
     var api: String
-    var searchable: Int?
-    var quickSearch: Int?
-    var filterable: Int?
-    var ext: JSONValue?
 
     enum CodingKeys: String, CodingKey {
-        case key, name, type, api, searchable, quickSearch, filterable, ext
+        case key, name, type, api
     }
 
     init(key: String, name: String, api: String) {
@@ -46,10 +38,6 @@ struct TVBoxSite: Codable, Identifiable, Hashable, Sendable {
         name = box.decodeFlexibleStringIfPresent(forKey: .name) ?? key
         type = box.decodeFlexibleIntIfPresent(forKey: .type) ?? -1
         api = box.decodeFlexibleStringIfPresent(forKey: .api) ?? ""
-        searchable = box.decodeFlexibleIntIfPresent(forKey: .searchable)
-        quickSearch = box.decodeFlexibleIntIfPresent(forKey: .quickSearch)
-        filterable = box.decodeFlexibleIntIfPresent(forKey: .filterable)
-        ext = try? box.decodeIfPresent(JSONValue.self, forKey: .ext)
         guard !key.isEmpty, !api.isEmpty else {
             throw DecodingError.dataCorruptedError(forKey: .key, in: box, debugDescription: "site 缺少 key 或 api")
         }
@@ -66,32 +54,13 @@ struct TVBoxSite: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
-struct TVBoxParse: Codable, Hashable, Sendable {
-    var name: String
-    var type: Int?
-    var url: String
-
-    enum CodingKeys: String, CodingKey { case name, type, url }
-
-    init(from decoder: Decoder) throws {
-        let box = try decoder.container(keyedBy: CodingKeys.self)
-        name = box.decodeFlexibleStringIfPresent(forKey: .name) ?? "解析"
-        type = box.decodeFlexibleIntIfPresent(forKey: .type)
-        url = box.decodeFlexibleStringIfPresent(forKey: .url) ?? ""
-        guard !url.isEmpty else {
-            throw DecodingError.dataCorruptedError(forKey: .url, in: box, debugDescription: "parse 缺少 url")
-        }
-    }
-}
-
 struct TVBoxLive: Codable, Hashable, Sendable {
     var name: String
-    var type: Int?
     var url: String
     var epg: String?
     var logo: String?
 
-    enum CodingKeys: String, CodingKey { case name, type, url, epg, logo }
+    enum CodingKeys: String, CodingKey { case name, url, epg, logo }
 
     init(name: String, url: String) {
         self.name = name; self.url = url
@@ -100,7 +69,6 @@ struct TVBoxLive: Codable, Hashable, Sendable {
     init(from decoder: Decoder) throws {
         let box = try decoder.container(keyedBy: CodingKeys.self)
         name = box.decodeFlexibleStringIfPresent(forKey: .name) ?? "直播"
-        type = box.decodeFlexibleIntIfPresent(forKey: .type)
         url = box.decodeFlexibleStringIfPresent(forKey: .url) ?? ""
         epg = box.decodeFlexibleStringIfPresent(forKey: .epg)
         logo = box.decodeFlexibleStringIfPresent(forKey: .logo)
@@ -117,7 +85,6 @@ struct LiveChannel: Codable, Identifiable, Hashable, Sendable {
     let streams: [LiveStream]
     let logoURL: URL?
 
-    var urls: [URL] { streams.map(\.url) }
 }
 
 struct LiveStream: Codable, Identifiable, Hashable, Sendable {
@@ -142,7 +109,7 @@ enum SourceRuntime: String, Sendable {
     }
 }
 
-enum JSONValue: Codable, Hashable, Sendable {
+private enum JSONValue: Decodable {
     case string(String), number(Double), bool(Bool), object([String: JSONValue]), array([JSONValue]), null
 
     init(from decoder: Decoder) throws {
@@ -155,17 +122,7 @@ enum JSONValue: Codable, Hashable, Sendable {
         else { self = .array(try box.decode([JSONValue].self)) }
     }
 
-    func encode(to encoder: Encoder) throws {
-        var box = encoder.singleValueContainer()
-        switch self {
-        case .string(let value): try box.encode(value)
-        case .number(let value): try box.encode(value)
-        case .bool(let value): try box.encode(value)
-        case .object(let value): try box.encode(value)
-        case .array(let value): try box.encode(value)
-        case .null: try box.encodeNil()
-        }
-    }
+
 }
 
 private struct LossyArray<Element: Decodable>: Decodable {

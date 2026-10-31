@@ -22,6 +22,8 @@ struct NativePlayerView: View {
     var onNext: (() -> Void)? = nil
     var canPrevious = false
     var canNext = false
+    var episodeStart: Double = 0
+    var onSetEpisodeStart: ((Double) -> Void)? = nil
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.playerControlsInteraction) private var interaction
     @StateObject private var controller = PlaybackController()
@@ -51,10 +53,33 @@ struct NativePlayerView: View {
             }
             if controlsVisible {
                 VStack { Spacer(); PlaybackTransportControls(controller: controller,
-                    onPrevious: onPrevious, onNext: onNext, canPrevious: canPrevious, canNext: canNext, playbackRate: $playbackRate) }
+                    onPrevious: onPrevious, onNext: onNext, canPrevious: canPrevious, canNext: canNext, playbackRate: $playbackRate,
+                    episodeStart: episodeStart, onSetEpisodeStart: onSetEpisodeStart) }
                     .transition(.opacity)
             }
-            if controller.isBuffering && controller.errorMessage == nil {
+            if controller.isPaused && controller.ready && controller.errorMessage == nil {
+                HStack(spacing: 28) {
+                    Button {
+                        interaction(.activity)
+                        Task { await controller.seek(to: controller.position - 10) }
+                    } label: {
+                        Image(systemName: "gobackward.10").font(.system(size: 32)).frame(width: 60, height: 64)
+                    }.disabled(!controller.canSeek).accessibilityLabel("后退 10 秒")
+                    Button { togglePlayback() } label: {
+                        Image(systemName: "play.fill").font(.system(size: 44)).frame(width: 76, height: 76)
+                    }.accessibilityLabel("继续播放")
+                    Button {
+                        interaction(.activity)
+                        Task { await controller.seek(to: controller.position + 10) }
+                    } label: {
+                        Image(systemName: "goforward.10").font(.system(size: 32)).frame(width: 60, height: 64)
+                    }.disabled(!controller.canSeek).accessibilityLabel("快进 10 秒")
+                }
+                .buttonStyle(.plain).foregroundStyle(.white)
+                .padding(.horizontal, 16).padding(.vertical, 8)
+                .background(.black.opacity(0.55), in: Capsule())
+            }
+            if controller.isBuffering && controller.errorMessage == nil && !controller.isPaused {
                 VStack(spacing: 8) {
                     ProgressView().tint(.white)
                     Text(controller.ready ? "缓冲中…" : "正在连接媒体…")
@@ -88,6 +113,7 @@ struct NativePlayerView: View {
             }
         }
         .task(id: "\(resource.url.absoluteString)|\(retryGeneration)") {
+            if playbackRate > 2 { playbackRate = 2 }
             controller.setRate(playbackRate)
             controller.setForeground(scenePhase == .active)
             await controller.start(resource: resource, position: requestedPosition ?? startPosition,

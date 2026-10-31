@@ -33,7 +33,7 @@ struct PlayerSurface: UIViewControllerRepresentable {
         var onTap: () -> Void
         var onDoubleTap: () -> Void
         init(onPan: @escaping (UIGestureRecognizer.State, CGPoint, CGPoint, CGSize) -> Void,
-             onTap: @escaping () -> Void = {}, onDoubleTap: @escaping () -> Void = {}) {
+             onTap: @escaping () -> Void, onDoubleTap: @escaping () -> Void) {
             self.onPan = onPan; self.onTap = onTap; self.onDoubleTap = onDoubleTap
         }
         func installGestures(in view: UIView) {

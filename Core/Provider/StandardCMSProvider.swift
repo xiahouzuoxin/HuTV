@@ -3,13 +3,11 @@ import Foundation
 enum ProviderError: LocalizedError {
     case invalidURL
     case invalidData
-    case noPlayableEpisodes
 
     var errorDescription: String? {
         switch self {
         case .invalidURL: "数据源 API 地址无效"
         case .invalidData: "数据源返回了无法识别的数据"
-        case .noPlayableEpisodes: "没有找到可播放线路"
         }
     }
 }

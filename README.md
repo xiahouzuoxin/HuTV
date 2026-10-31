@@ -7,7 +7,7 @@ iPhone / iPad 原生视频订阅客户端，支持 CMS JSON 点播、M3U / TXT �
 - **订阅管理**：点播、直播分组，支持单个或 JSON 批量导入，以及链接编辑、刷新、删除和拖动排序。
 - **搜索浏览**：多源搜索，左侧资源按有效结果数量排序，右侧以封面卡片展示。
 - **观看历史**：本机保存搜索历史、观看记录和进度，卡片式浏览并继续观看。
-- **视频播放**：支持手势、倍速、自动连播、播放中换源，以及源和内核允许时的清晰度选择，默认自动。
+- **视频播放**：支持手势、暂停中央控制、倍速、剧集起播位置、自动连播、播放中换源，以及源和内核允许时的清晰度选择，默认自动。
 
 详细操作和播放行为见[功能说明](Docs/Features.md)。
 
@@ -24,7 +24,7 @@ iPhone / iPad 原生视频订阅客户端，支持 CMS JSON 点播、M3U / TXT �
 
 在订阅页点击右上角“+”，选择 **点播 API**、**直播 M3U / TXT** 或 **TVBox 配置**，填写地址和可选名称。也可选择“通过 JSON 批量导入”，从在线链接（含 GitHub 文件链接）、粘贴文本或本地文件读取多个订阅，预览勾选后导入；格式与示例见[批量导入说明](Docs/BatchSubscriptions.md)。
 
-点击左上角“编辑”，可查看、复制、修改链接和名称，也可删除或在组内拖动排序。修改地址先验证，失败保留原配置；仅改名不联网。订阅页支持单项刷新和下拉刷新全部。
+点击左上角“编辑”，可查看、复制、修改链接和名称，也可删除或在组内拖动排序。修改地址先验证，失败保留原配置；仅改名不联网。订阅页支持单项刷新和下拉刷新全部。自动刷新默认关闭，可在设置中开启并选择 1、6、12、24 小时间隔（开启后默认 6 小时），仅在 App 前台执行；在线 JSON 导入可保存链接并跟随列表变化，在“在线 JSON 列表”中管理，详细规则见[批量导入说明](Docs/BatchSubscriptions.md)。
 
 点播优先使用 M3U8 / MP4 直链。支持 TVBox 配置中的兼容接口，不执行 Spider JAR、JS 爬虫或 `cms://` 插件，不提供通用网页解析和 DRM 绕过。公开收录地址不等于内容授权。
 
@@ -85,6 +85,18 @@ xcodebuild -project HuTV.xcodeproj -scheme HuTV \
 工程由 XcodeGen 生成；构建产物、用户配置、凭据和 VLC 二进制不入库。依赖下载脚本包含 SHA-256 校验，开源许可随 App 打包。依赖和目录说明见[架构文档](Docs/Architecture.md)。
 
 ### 签名与发布
+
+在 [GitHub Releases](https://github.com/xiahouzuoxin/HuTV/releases) 下载未签名 IPA 和 SHA-256 校验文件，再使用自己的 Apple ID 通过 Sideloadly 签名安装。
+
+供 Sideloadly 重新签名的真机 IPA，在 Mac 上执行：
+
+```sh
+./scripts/package-ipa.sh
+```
+
+脚本构建 Release、将 VLC 等可执行文件精简为 arm64、移除旧签名并校验，统一输出 `output/HuTV.ipa`。覆盖现有 App 时可用 `HUTV_BUNDLE_ID=已有包标识 ./scripts/package-ipa.sh` 指定 Bundle ID，并沿用 Sideloadly 中的签名账号与最终应用标识。
+
+首次安装或更新时将该 IPA 导入 Sideloadly，开启自动刷新。日常续签使用其缓存，无需重新打包；更新本地 IPA 后必须重新导入安装，缓存才会更新。主窗口可以关闭，菜单栏 / 托盘后台程序需保持运行；支持 USB 或配置好的同局域网 Wi-Fi 连接。
 
 - [Mac / Windows 签名续期](Docs/SigningRefresh.md)
 - [发布准备清单](Docs/Release/Checklist.md)
