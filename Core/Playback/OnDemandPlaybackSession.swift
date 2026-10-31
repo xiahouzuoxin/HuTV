@@ -31,9 +31,10 @@ final class OnDemandPlaybackSession {
         return true
     }
 
-    func select(item: MediaItem, source: TVBoxSite, episodes: [MediaEpisode], episode: MediaEpisode, keepPosition: Bool, episodeStart: Double = 0) {
+    func select(item: MediaItem, source: TVBoxSite, episodes: [MediaEpisode], episode: MediaEpisode, keepPosition: Bool, episodeStart: Double = 0, resumePosition: Double = 0) {
         self.episodeStart = Self.validStart(episodeStart)
-        startPosition = keepPosition ? max(position, self.episodeStart) : self.episodeStart
+        let resume = resumePosition.isFinite ? max(0, resumePosition) : 0
+        startPosition = max(keepPosition ? position : resume, self.episodeStart)
         position = startPosition; duration = 0
         self.item = item; self.source = source; allEpisodes = episodes
         queue = EpisodeQueue(episodes: episodes, selected: episode)

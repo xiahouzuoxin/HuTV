@@ -4,7 +4,7 @@ enum PlayerPageKind {
     case onDemand, live
 }
 
-/// Shared fullscreen shell. Playback-specific state stays in the owning session.
+/// Shared player shell. Playback-specific state stays in the owning session.
 struct PlayerPage<Content: View>: View {
     let title: String
     let subtitle: String
@@ -12,6 +12,10 @@ struct PlayerPage<Content: View>: View {
     let kind: PlayerPageKind
     let isChoosingSource: Bool
     let onSwitchSource: () -> Void
+    private let fullscreen: Binding<Bool>?
+    private let onClose: (() -> Void)?
+    private let onExitFullscreen: @MainActor () -> Void
+    private var isFullscreen: Bool { fullscreen?.wrappedValue ?? true }
     private let content: (Binding<Bool>) -> Content
     @Environment(\.dismiss) private var dismiss
     @State private var controlsVisible = false
@@ -22,19 +26,37 @@ struct PlayerPage<Content: View>: View {
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
 
     init(title: String, subtitle: String, programInfo: String? = nil, kind: PlayerPageKind, isChoosingSource: Bool = false,
-         onSwitchSource: @escaping () -> Void,
+         onSwitchSource: @escaping () -> Void, fullscreen: Binding<Bool>? = nil, onClose: (() -> Void)? = nil,
+         onExitFullscreen: @escaping @MainActor () -> Void = PlaybackOrientation.returnToPortrait,
          @ViewBuilder content: @escaping (Binding<Bool>) -> Content) {
+        self.fullscreen = fullscreen; self.onClose = onClose
+        self.onExitFullscreen = onExitFullscreen
         self.title = title; self.subtitle = subtitle; self.programInfo = programInfo
         self.kind = kind; self.isChoosingSource = isChoosingSource; self.onSwitchSource = onSwitchSource; self.content = content
     }
 
     var body: some View {
+        player
+        .background(isFullscreen ? Color.black : Color(.systemBackground))
+        .environment(\.playerFullscreen, isFullscreen)
+        .environment(\.playerToggleFullscreen, {
+            if isFullscreen { onExitFullscreen() }
+            if let fullscreen { fullscreen.wrappedValue.toggle() }
+            else { close() }
+            controlsVisible = true
+            registerInteraction(.activity)
+        })
+        .statusBarHidden(isFullscreen && !controlsVisible)
+        .persistentSystemOverlays(isFullscreen && !controlsVisible ? .hidden : .automatic)
+    }
+
+    private var player: some View {
         ZStack(alignment: .top) {
             Color.black.ignoresSafeArea()
             content($controlsVisible)
             if controlsVisible {
                 HStack(spacing: 16) {
-                    Button { dismiss() } label: {
+                    Button { close() } label: {
                         Image(systemName: "xmark.circle.fill").font(.title)
                     }
                     .accessibilityLabel("关闭播放器")
@@ -66,8 +88,11 @@ struct PlayerPage<Content: View>: View {
             guard !Task.isCancelled else { return }
             withAnimation(.easeInOut(duration: 0.15)) { controlsVisible = false }
         }
-        .statusBarHidden(!controlsVisible)
-        .persistentSystemOverlays(controlsVisible ? .automatic : .hidden)
+
+    }
+
+    private func close() {
+        if let onClose { onClose() } else { dismiss() }
     }
 
     private func registerInteraction(_ event: PlayerControlsInteraction) {

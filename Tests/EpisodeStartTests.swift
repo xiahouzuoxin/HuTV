@@ -39,6 +39,12 @@ final class EpisodeStartTests: XCTestCase {
         XCTAssertEqual(session.startPosition, 600)
         session.select(item: item("other"), source: source, episodes: episodes, episode: episodes[0], keepPosition: false)
         XCTAssertEqual(session.startPosition, 0)
+        session.select(item: item(), source: source, episodes: episodes, episode: episodes[1],
+                       keepPosition: false, episodeStart: 120, resumePosition: 260)
+        XCTAssertEqual(session.startPosition, 260, "Selecting from the embedded detail page must honor saved progress")
+        session.select(item: item(), source: source, episodes: episodes, episode: episodes[0],
+                       keepPosition: false, episodeStart: 120, resumePosition: .nan)
+        XCTAssertEqual(session.startPosition, 120)
     }
     @MainActor func testButtonRecordsAndLongPressDoesNotRecordAgainOnRelease() {
         let button = EpisodeStartButton(frame: .zero)

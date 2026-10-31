@@ -11,7 +11,8 @@ struct MediaDetailView: View {
     @State private var isPreparingPlayback = false
     @State private var preparationTask: Task<Void, Never>?
     @State private var didHandleInitialResume = false
-    @State private var playingResource: IdentifiedPlaybackResource?
+    @State private var playback: OnDemandPlaybackSession?
+    @State private var isFullscreen = true
 
     private var orderedLines: [String] {
         guard let detail else { return [] }
@@ -24,6 +25,25 @@ struct MediaDetailView: View {
     }
 
     var body: some View {
+        PlaybackDetailLayout(isPlaying: playback != nil, fullscreen: $isFullscreen) {
+            if let playback {
+                OnDemandPlayerView(playback: playback, isFullscreen: $isFullscreen, onClose: { self.playback = nil })
+            }
+        } detail: {
+            detailContent
+        }
+        .background(playback != nil && isFullscreen ? Color.black : Color(.systemBackground))
+        .toolbar(playback != nil && isFullscreen ? .hidden : .visible, for: .navigationBar, .tabBar)
+        .navigationBarBackButtonHidden(playback != nil && isFullscreen)
+        .onDisappear { preparationTask?.cancel() }
+        .navigationTitle(item.title).navigationBarTitleDisplayMode(.inline)
+        .task { await load() }
+        .alert("无法播放此线路", isPresented: Binding(
+            get: { playbackError != nil }, set: { if !$0 { playbackError = nil } }
+        )) { Button("好") {} } message: { Text(playbackError ?? "") }
+    }
+
+    private var detailContent: some View {
         Group {
             if let detail {
                 List {
@@ -57,7 +77,7 @@ struct MediaDetailView: View {
                                             .font(.subheadline).lineLimit(2)
                                             .frame(maxWidth: .infinity, minHeight: 38)
                                             .padding(.horizontal, 5).padding(.vertical, 3)
-                                            .background(Color.accentColor.opacity(0.09), in: RoundedRectangle(cornerRadius: 8))
+                                            .background(Color.accentColor.opacity(playback?.item.id == item.id && playback?.queue.current.id == episode.id ? 0.25 : 0.09), in: RoundedRectangle(cornerRadius: 8))
                                     }
                                     .buttonStyle(.plain)
                                     .foregroundStyle(Color.accentColor)
@@ -85,15 +105,6 @@ struct MediaDetailView: View {
                 ProgressView("正在获取最新播放地址…").padding()
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
             }
-        }
-        .onDisappear { preparationTask?.cancel() }
-        .navigationTitle(item.title).navigationBarTitleDisplayMode(.inline)
-        .task { await load() }
-        .alert("无法播放此线路", isPresented: Binding(
-            get: { playbackError != nil }, set: { if !$0 { playbackError = nil } }
-        )) { Button("好") {} } message: { Text(playbackError ?? "") }
-        .fullScreenCover(item: $playingResource) { value in
-            OnDemandPlayerView(item: item, source: provider.source, session: value, episodeStart: history.episodeStart(for: item))
         }
     }
 
@@ -128,7 +139,18 @@ struct MediaDetailView: View {
                 detail = fresh
                 let position = startPosition ?? history.resumeRecord(sourceID: item.sourceID, detailID: item.detailID,
                                                                        episode: current)?.resumePosition ?? 0
-                playingResource = IdentifiedPlaybackResource(episode: current, episodes: fresh.episodes, startPosition: position)
+                if let playback {
+                    history.record(.vod(item: playback.item, source: playback.source, episode: playback.queue.current),
+                                   position: playback.position, duration: playback.duration)
+                    playback.select(item: item, source: provider.source, episodes: fresh.episodes,
+                                    episode: current, keepPosition: false, episodeStart: history.episodeStart(for: item),
+                                    resumePosition: position)
+                } else {
+                    isFullscreen = true
+                    playback = OnDemandPlaybackSession(item: item, source: provider.source,
+                        episodes: fresh.episodes, selected: current, position: position,
+                        episodeStart: history.episodeStart(for: item))
+                }
             } catch {
                 if !Task.isCancelled { playbackError = "获取播放地址失败：\(error.localizedDescription)" }
             }
@@ -137,25 +159,15 @@ struct MediaDetailView: View {
 
 }
 
-struct IdentifiedPlaybackResource: Identifiable {
-    let id = UUID()
-    let episode: MediaEpisode
-    let episodes: [MediaEpisode]
-    let startPosition: Double
-}
-
 private struct OnDemandPlayerView: View {
     @AppStorage("playback.autoAdvance") private var autoAdvance = true
     @AppStorage("playback.forwardBufferSeconds") private var bufferSeconds = 30.0
     @Environment(HistoryStore.self) private var history
-    @State private var playback: OnDemandPlaybackSession
+    @Bindable var playback: OnDemandPlaybackSession
+    @Binding var isFullscreen: Bool
+    let onClose: () -> Void
     @State private var finished = false
     @State private var showingSourcePicker = false
-
-    init(item: MediaItem, source: TVBoxSite, session: IdentifiedPlaybackResource, episodeStart: Double) {
-        _playback = State(initialValue: OnDemandPlaybackSession(item: item, source: source,
-            episodes: session.episodes, selected: session.episode, position: session.startPosition, episodeStart: episodeStart))
-    }
 
     var body: some View {
         let episode = playback.queue.current
@@ -164,7 +176,8 @@ private struct OnDemandPlayerView: View {
         let activeSource = playback.source
         PlayerPage(title: playback.item.title,
                    subtitle: "\(playback.source.name) · \(episode.line) · \(episode.name)" + (finished ? " · 已播完" : ""),
-                   kind: .onDemand, isChoosingSource: showingSourcePicker, onSwitchSource: { showingSourcePicker = true }) { controls in
+                   kind: .onDemand, isChoosingSource: showingSourcePicker, onSwitchSource: { showingSourcePicker = true },
+                   fullscreen: $isFullscreen, onClose: onClose) { controls in
             if let url = URL(string: episode.url), ["http", "https"].contains(url.scheme?.lowercased()) {
                 NativePlayerView(resource: PlaybackResource(url: url), controlsVisible: controls,
                     startPosition: playback.startPosition,
@@ -196,6 +209,7 @@ private struct OnDemandPlayerView: View {
                     .onTapGesture { withAnimation { controls.wrappedValue.toggle() } }
             }
         }
+        .onChange(of: run) { finished = false }
         .sheet(isPresented: $showingSourcePicker) {
             PlaybackSourcePicker(item: playback.item, source: playback.source,
                                  episodes: playback.allEpisodes, current: playback.queue.current) { selection in

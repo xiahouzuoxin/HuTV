@@ -47,9 +47,9 @@ struct NativePlayerView: View {
     var body: some View {
         ZStack {
             if engine == .vlc {
-                VLCVideoSurface(player: controller.vlcPlayer, drawable: controller.vlcDrawable, onTap: toggleControls, onDoubleTap: togglePlayback, onPan: handlePan).ignoresSafeArea()
+                VLCVideoSurface(player: controller.vlcPlayer, drawable: controller.vlcDrawable, onTap: toggleControls, onDoubleTap: togglePlayback, onPan: handlePan)
             } else {
-                PlayerSurface(player: controller.player, onTap: toggleControls, onDoubleTap: togglePlayback, onPan: handlePan).ignoresSafeArea()
+                PlayerSurface(player: controller.player, onTap: toggleControls, onDoubleTap: togglePlayback, onPan: handlePan)
             }
             if controlsVisible {
                 VStack { Spacer(); PlaybackTransportControls(controller: controller,
@@ -138,6 +138,7 @@ struct NativePlayerView: View {
         .onDisappear {
             interaction(.ended)
             controller.stop()
+            requestedPosition = controller.retryPosition
             if let originalBrightness { screen.brightness = originalBrightness }
         }
     }

@@ -32,6 +32,8 @@ struct VLCVideoSurface: UIViewRepresentable {
 
 struct PlaybackTransportControls: View {
     @Environment(\.playerControlsInteraction) private var interaction
+    @Environment(\.playerFullscreen) private var fullscreen
+    @Environment(\.playerToggleFullscreen) private var toggleFullscreen
     @ObservedObject var controller: PlaybackController
     var onPrevious: (() -> Void)?
     var onNext: (() -> Void)?
@@ -128,6 +130,13 @@ struct PlaybackTransportControls: View {
                     }.frame(height: geometry.size.height)
                 }.frame(minWidth: 60).frame(height: 32)
                 Text(time(controller.duration)).font(.caption2).monospacedDigit().fixedSize()
+                Button {
+                    interaction(.activity)
+                    toggleFullscreen()
+                } label: {
+                    Image(systemName: fullscreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                        .frame(width: 44, height: 44)
+                }.accessibilityLabel(fullscreen ? "退出全屏" : "进入全屏")
             }
 
         }

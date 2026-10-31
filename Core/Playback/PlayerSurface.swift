@@ -14,6 +14,7 @@ struct PlayerSurface: UIViewControllerRepresentable {
         let controller = AVPlayerViewController()
         controller.player = player
         controller.showsPlaybackControls = false
+        controller.videoGravity = .resizeAspect
         context.coordinator.installGestures(in: controller.view)
         return controller
     }
