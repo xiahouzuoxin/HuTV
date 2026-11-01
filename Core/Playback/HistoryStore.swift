@@ -48,6 +48,7 @@ final class HistoryStore {
     private(set) var records: [WatchRecord] = []
     private(set) var persistenceError: String?
     private(set) var episodeStarts: [String: Double] = [:]
+    private var retired = false
     private let storageURL: URL
 
     private struct Snapshot: Codable {
@@ -112,7 +113,17 @@ final class HistoryStore {
     func clearRecords() { records = []; save() }
     func clearError() { persistenceError = nil }
 
+    func clearAll() throws {
+        let empty = Snapshot(searches: [], records: [], episodeStarts: [:])
+        try FileManager.default.createDirectory(at: storageURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(empty).write(to: storageURL, options: .atomic)
+        searches = []; records = []; episodeStarts = [:]; persistenceError = nil
+    }
+
+    func retire() { retired = true }
+
     private func save() {
+        guard !retired else { return }
         do {
             try FileManager.default.createDirectory(at: storageURL.deletingLastPathComponent(),
                                                     withIntermediateDirectories: true)

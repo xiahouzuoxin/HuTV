@@ -49,15 +49,18 @@ final class SearchModel {
         searchedKeyword = ""
     }
 
-    func search(_ keyword: String, sources: [SearchSource]) async {
+    func search(_ keyword: String, sources: [SearchSource], concurrency: Int? = nil) async {
         guard !Task.isCancelled else { return }
         let run = UUID()
         generation = run
         hasSearched = true
         searchedKeyword = keyword
         groups = sources.map { SourceSearchResults(source: $0) }
+        let configured = concurrency ?? UserDefaults.standard.object(forKey: "search.concurrency") as? Int ?? 4
+        let limit = min(8, max(1, configured))
         await withTaskGroup(of: Void.self) { group in
-            for source in sources {
+            var iterator = sources.makeIterator()
+            func enqueue(_ source: SearchSource) {
                 group.addTask {
                     let items: [MediaItem]
                     let message: String?
@@ -71,6 +74,11 @@ final class SearchModel {
                     guard !Task.isCancelled else { return }
                     await self.receive(items, error: message, sourceID: source.id, generation: run)
                 }
+            }
+            for _ in 0..<limit { if let source = iterator.next() { enqueue(source) } }
+            while await group.next() != nil {
+                guard !Task.isCancelled, generation == run else { group.cancelAll(); break }
+                if let source = iterator.next() { enqueue(source) }
             }
         }
     }

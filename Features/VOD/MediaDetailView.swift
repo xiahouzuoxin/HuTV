@@ -5,6 +5,8 @@ struct MediaDetailView: View {
     let provider: any ContentProvider
     let item: MediaItem
     var resumeRecord: WatchRecord? = nil
+    @State private var addressEpisode: MediaEpisode?
+    @State private var expandedSummary = true
     @State private var detail: MediaDetail?
     @State private var errorMessage: String?
     @State private var playbackError: String?
@@ -38,6 +40,19 @@ struct MediaDetailView: View {
         .onDisappear { preparationTask?.cancel() }
         .navigationTitle(item.title).navigationBarTitleDisplayMode(.inline)
         .task { await load() }
+        .sheet(item: $addressEpisode) { episode in
+            NavigationStack {
+                Form {
+                    LabeledContent("线路", value: episode.line)
+                    LabeledContent("集数", value: episode.name)
+                    Text(episode.url).textSelection(.enabled)
+                    Button("复制播放地址") { UIPasteboard.general.string = episode.url }
+                    Text("地址来自订阅，可能包含临时令牌或过期；请勿公开分享含凭证的地址。")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }.navigationTitle("播放地址")
+                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { addressEpisode = nil } } }
+            }
+        }
         .alert("无法播放此线路", isPresented: Binding(
             get: { playbackError != nil }, set: { if !$0 { playbackError = nil } }
         )) { Button("好") {} } message: { Text(playbackError ?? "") }
@@ -57,7 +72,19 @@ struct MediaDetailView: View {
                                 if !detail.metadata.isEmpty { Text(detail.metadata).foregroundStyle(.secondary) }
                             }
                         }
-                        if !detail.summary.isEmpty { Text(detail.summary) }
+                        if !detail.category.isEmpty { LabeledContent("类型", value: detail.category) }
+                        if !detail.director.isEmpty { LabeledContent("导演", value: detail.director) }
+                        if !detail.actors.isEmpty {
+                            LabeledContent("演员") {
+                                Text(detail.actors.count > 80 ? String(detail.actors.prefix(80)) + "…" : detail.actors)
+                                    .lineLimit(3).truncationMode(.tail)
+                            }
+                        }
+                        if !detail.summary.isEmpty {
+                            DisclosureGroup("内容介绍", isExpanded: $expandedSummary) {
+                                Text(detail.summary).textSelection(.enabled)
+                            }
+                        }
                         if let record = history.resumeRecord(sourceID: item.sourceID, detailID: item.detailID),
                            case .vod(_, _, let saved) = record.target,
                            let episode = detail.episodes.first(where: { $0.line == saved.line && $0.name == saved.name }) {
@@ -78,6 +105,10 @@ struct MediaDetailView: View {
                                             .frame(maxWidth: .infinity, minHeight: 38)
                                             .padding(.horizontal, 5).padding(.vertical, 3)
                                             .background(Color.accentColor.opacity(playback?.item.id == item.id && playback?.queue.current.id == episode.id ? 0.25 : 0.09), in: RoundedRectangle(cornerRadius: 8))
+                                    }
+                                    .contextMenu {
+                                        Button("查看播放地址") { addressEpisode = episode }
+                                        Button("复制播放地址") { UIPasteboard.general.string = episode.url }
                                     }
                                     .buttonStyle(.plain)
                                     .foregroundStyle(Color.accentColor)

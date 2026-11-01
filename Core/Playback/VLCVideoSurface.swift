@@ -4,6 +4,8 @@ import SwiftUI
 struct VLCVideoSurface: UIViewRepresentable {
     let player: VLCMediaPlayer?
     let drawable: UIView
+    var scaling: PlaybackScaling = .fit
+    var viewport: CGSize = .zero
     let onTap: () -> Void
     let onDoubleTap: () -> Void
     let onPan: (UIGestureRecognizer.State, CGPoint, CGPoint, CGSize) -> Void
@@ -18,9 +20,25 @@ struct VLCVideoSurface: UIViewRepresentable {
         context.coordinator.onPan = onPan
         context.coordinator.onTap = onTap
         context.coordinator.onDoubleTap = onDoubleTap
-        if context.coordinator.vlcPlayer !== player { context.coordinator.vlcPlayer?.drawable = nil }
+        if context.coordinator.vlcPlayer !== player {
+            context.coordinator.vlcPlayer?.drawable = nil
+            context.coordinator.scalingSignature = ""
+        }
         context.coordinator.vlcPlayer = player
         player?.drawable = view
+        let signature = "\(scaling.rawValue)|\(viewport)|\(player?.hasVideoOut ?? false)"
+        if let player, viewport.width > 0, viewport.height > 0, context.coordinator.scalingSignature != signature {
+            context.coordinator.scalingSignature = signature
+            player.scaleFactor = 0
+            player.videoAspectRatio = nil
+            player.videoCropGeometry = nil
+            let ratio = "\(Int(viewport.width.rounded())):\(Int(viewport.height.rounded()))"
+            if scaling == .crop {
+                ratio.withCString { player.videoCropGeometry = UnsafeMutablePointer(mutating: $0) }
+            } else if scaling != .fit {
+                ratio.withCString { player.videoAspectRatio = UnsafeMutablePointer(mutating: $0) }
+            }
+        }
     }
     static func dismantleUIView(_ view: UIView, coordinator: PlayerSurface.Coordinator) {
         for gesture in view.gestureRecognizers ?? [] { view.removeGestureRecognizer(gesture) }
@@ -31,6 +49,7 @@ struct VLCVideoSurface: UIViewRepresentable {
 }
 
 struct PlaybackTransportControls: View {
+    @AppStorage("playback.scaling") private var scaling: PlaybackScaling = .fit
     @Environment(\.playerControlsInteraction) private var interaction
     @Environment(\.playerFullscreen) private var fullscreen
     @Environment(\.playerToggleFullscreen) private var toggleFullscreen
@@ -50,7 +69,7 @@ struct PlaybackTransportControls: View {
         VStack(spacing: 2) {
             HStack {
                 if controller.vlcPlayer == nil && controller.bufferedAhead > 0 {
-                    Text("已缓冲至 " + time(min(total, current + controller.bufferedAhead)))
+                    Text("已缓冲至 " + time(min(total, current + controller.bufferedAhead))).lineLimit(1).minimumScaleFactor(0.7)
                 } else if controller.isBuffering { Text("缓冲中…") }
                 Spacer()
                 if let onSetEpisodeStart {
@@ -102,6 +121,15 @@ struct PlaybackTransportControls: View {
                     Text("\(playbackRate.formatted())×").padding(.horizontal, 8).frame(minHeight: 32)
                 }
                 .accessibilityLabel("播放速度，当前 \(playbackRate.formatted()) 倍")
+                .simultaneousGesture(TapGesture().onEnded { interaction(.activity) })
+                Menu {
+                    Picker("画面缩放", selection: $scaling) {
+                        ForEach(PlaybackScaling.allCases) { Text($0.label).tag($0) }
+                    }
+                } label: {
+                    Image(systemName: "aspectratio").frame(width: 36, height: 32)
+                }
+                .accessibilityLabel("画面缩放，当前 \(scaling.label)")
                 .simultaneousGesture(TapGesture().onEnded { interaction(.activity) })
             }.font(.caption2).foregroundStyle(.white.opacity(0.8))
             HStack(spacing: 6) {

@@ -27,6 +27,7 @@ struct NativePlayerView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.playerControlsInteraction) private var interaction
     @StateObject private var controller = PlaybackController()
+    @AppStorage("playback.scaling") private var scaling: PlaybackScaling = .fit
     @AppStorage("playback.engine") private var engine: PlaybackEngine = .avPlayer
     @AppStorage("playback.volume") private var volume = 1.0
     @AppStorage("playback.rate") private var playbackRate = 1.0
@@ -46,10 +47,20 @@ struct NativePlayerView: View {
 
     var body: some View {
         ZStack {
-            if engine == .vlc {
-                VLCVideoSurface(player: controller.vlcPlayer, drawable: controller.vlcDrawable, onTap: toggleControls, onDoubleTap: togglePlayback, onPan: handlePan)
-            } else {
-                PlayerSurface(player: controller.player, onTap: toggleControls, onDoubleTap: togglePlayback, onPan: handlePan)
+            GeometryReader { geometry in
+                let size = scaling.frame(in: geometry.size)
+                ZStack {
+                    Color.black
+                    if engine == .vlc {
+                        VLCVideoSurface(player: controller.vlcPlayer, drawable: controller.vlcDrawable,
+                            scaling: scaling, viewport: size, onTap: toggleControls, onDoubleTap: togglePlayback, onPan: handlePan)
+                            .frame(width: size.width, height: size.height)
+                    } else {
+                        PlayerSurface(player: controller.player, scaling: scaling,
+                            onTap: toggleControls, onDoubleTap: togglePlayback, onPan: handlePan)
+                            .frame(width: size.width, height: size.height)
+                    }
+                }.frame(width: geometry.size.width, height: geometry.size.height).clipped()
             }
             if controlsVisible {
                 VStack { Spacer(); PlaybackTransportControls(controller: controller,
@@ -57,7 +68,7 @@ struct NativePlayerView: View {
                     episodeStart: episodeStart, onSetEpisodeStart: onSetEpisodeStart) }
                     .transition(.opacity)
             }
-            if controller.isPaused && controller.ready && controller.errorMessage == nil {
+            if (controlsVisible || controller.isPaused) && controller.ready && controller.errorMessage == nil {
                 HStack(spacing: 28) {
                     Button {
                         interaction(.activity)
@@ -66,8 +77,8 @@ struct NativePlayerView: View {
                         Image(systemName: "gobackward.10").font(.system(size: 32)).frame(width: 60, height: 64)
                     }.disabled(!controller.canSeek).accessibilityLabel("后退 10 秒")
                     Button { togglePlayback() } label: {
-                        Image(systemName: "play.fill").font(.system(size: 44)).frame(width: 76, height: 76)
-                    }.accessibilityLabel("继续播放")
+                        Image(systemName: controller.isPaused ? "play.fill" : "pause.fill").font(.system(size: 44)).frame(width: 76, height: 76)
+                    }.accessibilityLabel(controller.isPaused ? "继续播放" : "暂停播放")
                     Button {
                         interaction(.activity)
                         Task { await controller.seek(to: controller.position + 10) }
@@ -144,6 +155,7 @@ struct NativePlayerView: View {
     }
 
     private func toggleControls() {
+        interaction(.activity)
         withAnimation(.easeInOut(duration: 0.15)) { controlsVisible.toggle() }
     }
 

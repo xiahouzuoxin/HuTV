@@ -32,6 +32,9 @@ struct MediaDetail: Identifiable, Hashable, Sendable {
     let summary: String
     let metadata: String
     let episodes: [MediaEpisode]
+    var director: String = ""
+    var actors: String = ""
+    var category: String = ""
 }
 
 protocol ContentProvider: Sendable {

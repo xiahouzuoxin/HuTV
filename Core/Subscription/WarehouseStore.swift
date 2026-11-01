@@ -23,6 +23,7 @@ final class WarehouseStore {
     private(set) var lastRefreshErrors: [String] = []
     private var lastAutomaticRefresh: Date?
     private var refreshingFeedIDs: Set<UUID> = []
+    private var retired = false
     private let storageURL: URL
     private let loader: SubscriptionLoader
     private var installedPresetVersion = 0
@@ -331,7 +332,21 @@ final class WarehouseStore {
 
     func clearPersistenceError() { lastPersistenceError = nil }
 
+    func clearAll() throws {
+        // Preserve the preset version so an empty library stays empty after relaunch.
+        let empty = Snapshot(warehouses: [], defaultsInstalled: nil,
+                             installedPresetVersion: DefaultSubscriptions.version, feeds: [], lastAutomaticRefresh: nil)
+        try FileManager.default.createDirectory(at: storageURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(empty).write(to: storageURL, options: .atomic)
+        warehouses = []; feeds = []; lastAutomaticRefresh = nil
+        installedPresetVersion = DefaultSubscriptions.version
+        lastPersistenceError = nil; lastRefreshErrors = []
+    }
+
+    func retire() { retired = true }
+
     private func save() throws {
+        guard !retired else { throw CancellationError() }
         let data = try JSONEncoder().encode(Snapshot(warehouses: warehouses, defaultsInstalled: nil, installedPresetVersion: installedPresetVersion, feeds: feeds, lastAutomaticRefresh: lastAutomaticRefresh))
         try FileManager.default.createDirectory(at: storageURL.deletingLastPathComponent(),
                                                 withIntermediateDirectories: true)

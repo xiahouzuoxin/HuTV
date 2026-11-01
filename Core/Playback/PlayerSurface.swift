@@ -5,6 +5,7 @@ import SwiftUI
 /// Pan recognition excludes transport controls and does not swallow taps.
 struct PlayerSurface: UIViewControllerRepresentable {
     let player: AVPlayer?
+    var scaling: PlaybackScaling = .fit
     let onTap: () -> Void
     let onDoubleTap: () -> Void
     let onPan: (UIGestureRecognizer.State, CGPoint, CGPoint, CGSize) -> Void
@@ -14,11 +15,12 @@ struct PlayerSurface: UIViewControllerRepresentable {
         let controller = AVPlayerViewController()
         controller.player = player
         controller.showsPlaybackControls = false
-        controller.videoGravity = .resizeAspect
+        controller.videoGravity = scaling.gravity
         context.coordinator.installGestures(in: controller.view)
         return controller
     }
     func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {
+        controller.videoGravity = scaling.gravity
         if controller.player !== player { controller.player = player }
         context.coordinator.onPan = onPan
         context.coordinator.onTap = onTap
@@ -30,6 +32,7 @@ struct PlayerSurface: UIViewControllerRepresentable {
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         weak var vlcPlayer: VLCMediaPlayer?
+        var scalingSignature = ""
         var onPan: (UIGestureRecognizer.State, CGPoint, CGPoint, CGSize) -> Void
         var onTap: () -> Void
         var onDoubleTap: () -> Void

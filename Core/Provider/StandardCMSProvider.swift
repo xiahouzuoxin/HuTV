@@ -67,7 +67,8 @@ struct StandardCMSProvider: ContentProvider {
             posterURL: URL(string: vod.picture),
             summary: vod.content.removingHTML,
             metadata: [vod.year, vod.area, vod.remarks].filter { !$0.isEmpty }.joined(separator: " · "),
-            episodes: episodes
+            episodes: episodes, director: vod.director.removingHTML,
+            actors: vod.actors.removingHTML, category: vod.category.removingHTML
         )
     }
 
@@ -133,12 +134,16 @@ struct CMSVod: Decodable {
     let year: String
     let area: String
     let content: String
+    let director: String
+    let actors: String
+    let category: String
     let playFrom: String
     let playURL: String
 
     enum CodingKeys: String, CodingKey {
         case id = "vod_id", name = "vod_name", picture = "vod_pic", remarks = "vod_remarks"
         case year = "vod_year", area = "vod_area", content = "vod_content"
+        case director = "vod_director", actors = "vod_actor", category = "type_name"
         case playFrom = "vod_play_from", playURL = "vod_play_url"
     }
 
@@ -150,6 +155,9 @@ struct CMSVod: Decodable {
         remarks = box.flexibleString(.remarks)
         year = box.flexibleString(.year)
         area = box.flexibleString(.area)
+        director = box.flexibleString(.director)
+        actors = box.flexibleString(.actors)
+        category = box.flexibleString(.category)
         content = box.flexibleString(.content)
         playFrom = box.flexibleString(.playFrom)
         playURL = box.flexibleString(.playURL)

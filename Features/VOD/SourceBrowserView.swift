@@ -54,17 +54,27 @@ struct SourceBrowserView: View {
                     }.padding(.vertical, 8)
                 }
 
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 105), spacing: 12)], spacing: 16) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 105), spacing: 12, alignment: .top)], alignment: .center, spacing: 16) {
                     ForEach(items) { item in
                         NavigationLink {
                             MediaDetailView(provider: provider, item: item)
                         } label: {
                             VStack(alignment: .leading, spacing: 6) {
-                                AsyncImage(url: item.posterURL) { image in
-                                    image.resizable().scaledToFill()
-                                } placeholder: { Rectangle().fill(.quaternary) }
-                                .frame(height: 155).clipShape(RoundedRectangle(cornerRadius: 8))
-                                Text(item.title).font(.subheadline).lineLimit(2)
+                                // The grid determines the poster width; loaded image dimensions
+                                // must never participate in sizing the card.
+                                Rectangle().fill(.quaternary)
+                                    .frame(height: 155)
+                                    .overlay {
+                                        GeometryReader { geometry in
+                                            AsyncImage(url: item.posterURL) { image in
+                                                image.resizable().scaledToFill()
+                                            } placeholder: { Color.clear }
+                                            .frame(width: geometry.size.width, height: geometry.size.height)
+                                        }
+                                    }
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                Text(item.title).font(.subheadline).lineLimit(2, reservesSpace: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }.buttonStyle(.plain)
                         .onAppear {
