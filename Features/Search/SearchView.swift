@@ -134,6 +134,9 @@ struct SearchView: View {
                                             else { Image(systemName: "film").font(.largeTitle).foregroundStyle(.secondary) }
                                         }
                                     }.clipped()
+                                    .overlay(alignment: .topTrailing) {
+                                        if let rating = item.rating { MediaRatingBadge(rating: rating).padding(5) }
+                                    }
                                 Text(item.title).font(.subheadline.weight(.medium))
                                     .foregroundStyle(.primary).lineLimit(2, reservesSpace: true)
                                     .frame(maxWidth: .infinity, alignment: .leading).padding(8)
@@ -151,28 +154,9 @@ struct SearchView: View {
     }
 
     private var searchHistory: some View {
-        List {
-            if history.searches.isEmpty {
-                ContentUnavailableView("搜索影片", systemImage: "magnifyingglass",
-                    description: Text(sources.isEmpty ? "先添加点播订阅，再搜索喜欢的影片" : "搜索结果将按订阅源分开展示"))
-                    .listRowSeparator(.hidden)
-            } else {
-                Section {
-                    ForEach(history.searches, id: \.self) { value in
-                        Button { keyword = value; submit(value) } label: {
-                            Label(value, systemImage: "clock").foregroundStyle(.primary)
-                        }
-                        .swipeActions { Button("删除", role: .destructive) { history.removeSearch(value) } }
-                    }
-                } header: {
-                    HStack {
-                        Text("搜索历史")
-                        Spacer()
-                        Button("清空") { confirmingClear = true }
-                    }
-                }
-            }
-        }.listStyle(.plain)
+        SearchDiscoveryView(searches: history.searches, hasSources: !sources.isEmpty,
+            onSearch: { value in keyword = value; submit(value) },
+            onRemove: { history.removeSearch($0) }, onClear: { confirmingClear = true })
     }
 
     private func submit(_ text: String) {

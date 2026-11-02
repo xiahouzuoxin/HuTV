@@ -5,6 +5,11 @@ struct MediaDetailView: View {
     let provider: any ContentProvider
     let item: MediaItem
     var resumeRecord: WatchRecord? = nil
+    @State private var selectedItem: MediaItem?
+    @State private var selectedSource: TVBoxSite?
+    private var activeItem: MediaItem { selectedItem ?? item }
+    private var activeSource: TVBoxSite { selectedSource ?? provider.source }
+
     @State private var addressEpisode: MediaEpisode?
     @State private var expandedSummary = true
     @State private var detail: MediaDetail?
@@ -29,7 +34,13 @@ struct MediaDetailView: View {
     var body: some View {
         PlaybackDetailLayout(isPlaying: playback != nil, fullscreen: $isFullscreen) {
             if let playback {
-                OnDemandPlayerView(playback: playback, isFullscreen: $isFullscreen, onClose: { self.playback = nil })
+                OnDemandPlayerView(playback: playback, isFullscreen: $isFullscreen, onClose: { self.playback = nil }, onSourceSelected: { selection in
+                    preparationTask?.cancel()
+                    selectedItem = selection.item
+                    selectedSource = selection.source
+                    if let updated = selection.detail { detail = updated }
+                    addressEpisode = nil
+                })
             }
         } detail: {
             detailContent
@@ -38,7 +49,7 @@ struct MediaDetailView: View {
         .toolbar(playback != nil && isFullscreen ? .hidden : .visible, for: .navigationBar, .tabBar)
         .navigationBarBackButtonHidden(playback != nil && isFullscreen)
         .onDisappear { preparationTask?.cancel() }
-        .navigationTitle(item.title).navigationBarTitleDisplayMode(.inline)
+        .navigationTitle(activeItem.title).navigationBarTitleDisplayMode(.inline)
         .task { await load() }
         .sheet(item: $addressEpisode) { episode in
             NavigationStack {
@@ -72,7 +83,13 @@ struct MediaDetailView: View {
                                 if !detail.metadata.isEmpty { Text(detail.metadata).foregroundStyle(.secondary) }
                             }
                         }
+                        if let rating = detail.rating {
+                            LabeledContent(rating.source, value: "\(rating.text) / 10")
+                        }
                         if !detail.category.isEmpty { LabeledContent("类型", value: detail.category) }
+                        if !detail.language.isEmpty { LabeledContent("语言", value: detail.language) }
+                        if !detail.releaseDate.isEmpty { LabeledContent("上映日期", value: detail.releaseDate) }
+                        if !detail.runningTime.isEmpty { LabeledContent("片长（源提供）", value: detail.runningTime) }
                         if !detail.director.isEmpty { LabeledContent("导演", value: detail.director) }
                         if !detail.actors.isEmpty {
                             LabeledContent("演员") {
@@ -85,7 +102,7 @@ struct MediaDetailView: View {
                                 Text(detail.summary).textSelection(.enabled)
                             }
                         }
-                        if let record = history.resumeRecord(sourceID: item.sourceID, detailID: item.detailID),
+                        if let record = history.resumeRecord(sourceID: activeItem.sourceID, detailID: activeItem.detailID),
                            case .vod(_, _, let saved) = record.target,
                            let episode = detail.episodes.first(where: { $0.line == saved.line && $0.name == saved.name }) {
                             Button("继续观看 · \(episode.name) · \(Int(record.position) / 60):\(String(format: "%02d", Int(record.position) % 60))") {
@@ -104,7 +121,7 @@ struct MediaDetailView: View {
                                             .font(.subheadline).lineLimit(2)
                                             .frame(maxWidth: .infinity, minHeight: 38)
                                             .padding(.horizontal, 5).padding(.vertical, 3)
-                                            .background(Color.accentColor.opacity(playback?.item.id == item.id && playback?.queue.current.id == episode.id ? 0.25 : 0.09), in: RoundedRectangle(cornerRadius: 8))
+                                            .background(Color.accentColor.opacity(playback?.item.id == activeItem.id && playback?.queue.current.id == episode.id ? 0.25 : 0.09), in: RoundedRectangle(cornerRadius: 8))
                                     }
                                     .contextMenu {
                                         Button("查看播放地址") { addressEpisode = episode }
@@ -140,8 +157,10 @@ struct MediaDetailView: View {
     }
 
     @MainActor private func load() async {
+        guard detail == nil else { return }
         do {
             let loaded = try await provider.detail(id: item.detailID)
+            guard !Task.isCancelled, selectedItem == nil else { return }
             detail = loaded
             if !didHandleInitialResume, let record = resumeRecord, case .vod(_, _, let saved) = record.target {
                 didHandleInitialResume = true
@@ -156,11 +175,17 @@ struct MediaDetailView: View {
 
     private func play(_ episode: MediaEpisode, startPosition: Double? = nil) {
         guard !isPreparingPlayback else { return }
+        let item = activeItem
+        let source = activeSource
+        guard let activeProvider = selectedSource == nil ? provider : ContentProviderFactory.make(for: source) else {
+            playbackError = "当前订阅源不可用。"
+            return
+        }
         isPreparingPlayback = true
         preparationTask = Task { @MainActor in
             defer { isPreparingPlayback = false }
             do {
-                let fresh = try await provider.detail(id: item.detailID)
+                let fresh = try await activeProvider.detail(id: item.detailID)
                 guard !Task.isCancelled else { return }
                 guard let current = fresh.episodes.first(where: { $0.line == episode.line && $0.name == episode.name }),
                       let url = URL(string: current.url), ["http", "https"].contains(url.scheme?.lowercased()) else {
@@ -173,12 +198,12 @@ struct MediaDetailView: View {
                 if let playback {
                     history.record(.vod(item: playback.item, source: playback.source, episode: playback.queue.current),
                                    position: playback.position, duration: playback.duration)
-                    playback.select(item: item, source: provider.source, episodes: fresh.episodes,
+                    playback.select(item: item, source: source, episodes: fresh.episodes,
                                     episode: current, keepPosition: false, episodeStart: history.episodeStart(for: item),
                                     resumePosition: position)
                 } else {
                     isFullscreen = true
-                    playback = OnDemandPlaybackSession(item: item, source: provider.source,
+                    playback = OnDemandPlaybackSession(item: item, source: source,
                         episodes: fresh.episodes, selected: current, position: position,
                         episodeStart: history.episodeStart(for: item))
                 }
@@ -192,11 +217,13 @@ struct MediaDetailView: View {
 
 private struct OnDemandPlayerView: View {
     @AppStorage("playback.autoAdvance") private var autoAdvance = true
-    @AppStorage("playback.forwardBufferSeconds") private var bufferSeconds = 30.0
+    @AppStorage("playback.forwardBufferSeconds") private var bufferSeconds = 0.0
     @Environment(HistoryStore.self) private var history
     @Bindable var playback: OnDemandPlaybackSession
     @Binding var isFullscreen: Bool
     let onClose: () -> Void
+    let onSourceSelected: (PlaybackSourceSelection) -> Void
+    @State private var selectionTask: Task<Void, Never>?
     @State private var finished = false
     @State private var showingSourcePicker = false
 
@@ -216,7 +243,7 @@ private struct OnDemandPlayerView: View {
                     onProgress: { position, duration in
                         if playback.acceptProgress(position, duration: duration, revision: run) {
                             history.record(.vod(item: activeItem, source: activeSource, episode: episode),
-                                           position: position, duration: duration)
+                                           position: position, duration: duration, deferred: true)
                         }
                     },
                     onEnded: {
@@ -226,11 +253,14 @@ private struct OnDemandPlayerView: View {
                     },
                     onPrevious: { if playback.revision == run { retreat(before: episode.id) } },
                     onNext: { if playback.revision == run { advance(after: episode.id) } },
-                    canPrevious: playback.queue.hasPrevious, canNext: playback.queue.hasNext,
+                    canPrevious: playback.queue.hasPrevious && !playback.isResolving, canNext: playback.queue.hasNext && !playback.isResolving,
                     episodeStart: playback.episodeStart,
                     onSetEpisodeStart: { seconds in
                         history.setEpisodeStart(seconds, for: playback.item)
                         playback.setEpisodeStart(history.episodeStart(for: playback.item))
+                    }, onCheckpoint: { history.flushPending() }, onReload: {
+                        let (_, fresh) = try await EpisodeResolver.resolve(item: activeItem, source: activeSource, episode: episode)
+                        return PlaybackResource(url: URL(string: fresh.url)!)
                     })
                     .id(run)
             } else {
@@ -241,14 +271,23 @@ private struct OnDemandPlayerView: View {
             }
         }
         .onChange(of: run) { finished = false }
+        .onDisappear { selectionTask?.cancel(); history.flushPending() }
+        .overlay(alignment: .topLeading) {
+            if playback.isResolving { ProgressView("获取播放地址…").padding().background(.regularMaterial) }
+        }
+        .alert("切集失败", isPresented: Binding(get: { playback.resolutionError != nil }, set: { if !$0 { playback.resolutionError = nil } })) {
+            Button("好") { playback.resolutionError = nil }
+        } message: { Text(playback.resolutionError ?? "") }
         .sheet(isPresented: $showingSourcePicker) {
             PlaybackSourcePicker(item: playback.item, source: playback.source,
                                  episodes: playback.allEpisodes, current: playback.queue.current) { selection in
+                selectionTask?.cancel()
                 history.record(.vod(item: playback.item, source: playback.source, episode: playback.queue.current),
                                position: playback.position, duration: playback.duration)
                 playback.select(item: selection.item, source: selection.source, episodes: selection.episodes,
                                 episode: selection.episode, keepPosition: selection.keepPosition,
                                 episodeStart: history.episodeStart(for: selection.item))
+                onSourceSelected(selection)
                 finished = false
                 showingSourcePicker = false
             }
@@ -256,10 +295,20 @@ private struct OnDemandPlayerView: View {
     }
 
     private func retreat(before id: String) {
-        if playback.retreat(before: id) { finished = false }
+        guard playback.queue.current.id == id else { return }
+        move(by: -1)
     }
 
     private func advance(after id: String) {
-        if playback.advance(after: id) { finished = false }
+        guard playback.queue.current.id == id else { return }
+        move(by: 1)
     }
+    private func move(by offset: Int) {
+        guard !playback.isResolving else { return }
+        selectionTask = Task {
+            history.flushPending()
+            if await playback.move(by: offset) { finished = false }
+        }
+    }
+
 }

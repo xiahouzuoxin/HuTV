@@ -50,8 +50,12 @@ final class HistoryStore {
     private(set) var episodeStarts: [String: Double] = [:]
     private var retired = false
     private let storageURL: URL
+    private let writer: HistoryWriter
+    private var pendingSave: Task<Void, Never>?
+    private var dirty = false
+    private var writeGeneration = UUID()
 
-    private struct Snapshot: Codable {
+    private struct Snapshot: Codable, Sendable {
         var searches: [String]
         var records: [WatchRecord]
         var episodeStarts: [String: Double]?
@@ -60,6 +64,7 @@ final class HistoryStore {
     init(storageURL: URL? = nil) {
         self.storageURL = storageURL ?? FileManager.default.urls(for: .applicationSupportDirectory,
             in: .userDomainMask).first!.appendingPathComponent("TVBoxiOS/history.json")
+        writer = HistoryWriter(url: self.storageURL)
         if FileManager.default.fileExists(atPath: self.storageURL.path) {
             do {
                 let snapshot = try JSONDecoder().decode(Snapshot.self, from: Data(contentsOf: self.storageURL))
@@ -80,14 +85,17 @@ final class HistoryStore {
     }
     func removeSearch(_ value: String) { searches.removeAll { $0 == value }; save() }
     func clearSearches() { searches = []; save() }
-    func record(_ target: WatchTarget, position: Double, duration: Double) {
+    func record(_ target: WatchTarget, position: Double, duration: Double, deferred: Bool = false) {
         guard position.isFinite, position >= 0 else { return }
+        guard !retired else { return }
+        if let previous = records.first, previous.id == target.id, previous.target.subtitle == target.subtitle,
+            previous.position == position, previous.duration == duration { return }
         records.removeAll { $0.id == target.id }
         records.insert(WatchRecord(target: target, position: position,
                                   duration: duration.isFinite && duration > 0 ? duration : 0,
                                   watchedAt: .now), at: 0)
         records = Array(records.prefix(200))
-        save()
+        if deferred { scheduleSave() } else { save() }
     }
     func resumeRecord(sourceID: String, detailID: String, episode: MediaEpisode? = nil) -> WatchRecord? {
         records.first { record in
@@ -114,21 +122,47 @@ final class HistoryStore {
     func clearError() { persistenceError = nil }
 
     func clearAll() throws {
-        let empty = Snapshot(searches: [], records: [], episodeStarts: [:])
-        try FileManager.default.createDirectory(at: storageURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try JSONEncoder().encode(empty).write(to: storageURL, options: .atomic)
-        searches = []; records = []; episodeStarts = [:]; persistenceError = nil
+        pendingSave?.cancel(); pendingSave = nil
+        writeGeneration = UUID()
+        try writer.write(Snapshot(searches: [], records: [], episodeStarts: [:]))
+        searches = []; records = []; episodeStarts = [:]; persistenceError = nil; dirty = false
     }
 
-    func retire() { retired = true }
+    func retire() {
+        retired = true; pendingSave?.cancel(); pendingSave = nil
+        writeGeneration = UUID()
+    }
+
+    private var snapshot: Snapshot { Snapshot(searches: searches, records: records, episodeStarts: episodeStarts) }
+
+    private func scheduleSave() {
+        dirty = true
+        guard pendingSave == nil else { return }
+        pendingSave = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(15)) } catch { return }
+            self?.flushPending()
+        }
+    }
+
+    func flushPending() {
+        pendingSave?.cancel(); pendingSave = nil
+        guard dirty, !retired else { return }
+        dirty = false
+        let run = writeGeneration
+        writer.enqueue(snapshot) { [weak self] error in
+            Task { @MainActor in
+                guard let self, self.writeGeneration == run, !self.retired else { return }
+                if let error { self.persistenceError = "保存历史失败：\(error)"; self.dirty = true }
+            }
+        }
+    }
+
+    func waitForPendingWrites() { writer.drain() }
 
     private func save() {
         guard !retired else { return }
-        do {
-            try FileManager.default.createDirectory(at: storageURL.deletingLastPathComponent(),
-                                                    withIntermediateDirectories: true)
-            try JSONEncoder().encode(Snapshot(searches: searches, records: records, episodeStarts: episodeStarts))
-                .write(to: storageURL, options: .atomic)
-        } catch { persistenceError = "保存历史失败：\(error.localizedDescription)" }
+        pendingSave?.cancel(); pendingSave = nil; writeGeneration = UUID()
+        do { try writer.write(snapshot); dirty = false }
+        catch { dirty = true; persistenceError = "保存历史失败：\(error.localizedDescription)" }
     }
 }

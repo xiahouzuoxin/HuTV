@@ -6,6 +6,7 @@ struct VLCVideoSurface: UIViewRepresentable {
     let drawable: UIView
     var scaling: PlaybackScaling = .fit
     var viewport: CGSize = .zero
+    var controlsVisible = false
     let onTap: () -> Void
     let onDoubleTap: () -> Void
     let onPan: (UIGestureRecognizer.State, CGPoint, CGPoint, CGSize) -> Void
@@ -17,6 +18,7 @@ struct VLCVideoSurface: UIViewRepresentable {
         return view
     }
     func updateUIView(_ view: UIView, context: Context) {
+        context.coordinator.controlsVisible = controlsVisible
         context.coordinator.onPan = onPan
         context.coordinator.onTap = onTap
         context.coordinator.onDoubleTap = onDoubleTap
@@ -25,7 +27,7 @@ struct VLCVideoSurface: UIViewRepresentable {
             context.coordinator.scalingSignature = ""
         }
         context.coordinator.vlcPlayer = player
-        player?.drawable = view
+        if (player?.drawable as? UIView) !== view { player?.drawable = view }
         let signature = "\(scaling.rawValue)|\(viewport)|\(player?.hasVideoOut ?? false)"
         if let player, viewport.width > 0, viewport.height > 0, context.coordinator.scalingSignature != signature {
             context.coordinator.scalingSignature = signature
@@ -61,10 +63,10 @@ struct PlaybackTransportControls: View {
     @Binding var playbackRate: Double
     var episodeStart: Double = 0
     var onSetEpisodeStart: ((Double) -> Void)? = nil
-    @State private var editing = false
-    @State private var preview = 0.0
+    @State private var scrub = PlaybackScrubState()
     private var total: Double { controller.duration.isFinite && controller.duration > 0 ? controller.duration : 1 }
     private var current: Double { controller.position.isFinite ? min(max(0, controller.position), total) : 0 }
+    private var displayedPosition: Double { scrub.displayedPosition(current: current, duration: total) }
     var body: some View {
         VStack(spacing: 2) {
             HStack {
@@ -134,7 +136,7 @@ struct PlaybackTransportControls: View {
             }.font(.caption2).foregroundStyle(.white.opacity(0.8))
             HStack(spacing: 6) {
                 transportButtons
-                Text(time(editing ? preview : current)).font(.caption2).monospacedDigit().fixedSize()
+                Text(time(displayedPosition)).font(.caption2).monospacedDigit().fixedSize()
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
                         Capsule().fill(.white.opacity(0.15)).frame(height: 4)
@@ -144,19 +146,25 @@ struct PlaybackTransportControls: View {
                                 .offset(x: min(total, range.lowerBound) / total * geometry.size.width)
                         }
                         Capsule().fill(Color.accentColor)
-                            .frame(width: (editing ? preview : current) / total * geometry.size.width, height: 4)
-                        Slider(value: Binding(get: { editing ? preview : current }, set: { preview = $0 }),
+                            .frame(width: (displayedPosition) / total * geometry.size.width, height: 4)
+                        Slider(value: Binding(get: { displayedPosition }, set: { scrub.update(to: $0) }),
                                in: 0...total, onEditingChanged: { active in
-                            interaction(active ? .began : .ended)
-                            if active { preview = current }
-                            editing = active
-                            if !active { Task { await controller.seek(to: preview) } }
+                            if active {
+                                scrub.begin(at: current)
+                                interaction(.began)
+                            } else if let request = scrub.commit() {
+                                Task {
+                                    await controller.seek(to: request.position)
+                                    if scrub.complete(request.id) { interaction(.ended) }
+                                }
+                            }
                         })
                         .tint(.clear)
                         .disabled(!controller.canSeek)
                         .accessibilityLabel("播放进度")
                     }.frame(height: geometry.size.height)
                 }.frame(minWidth: 60).frame(height: 32)
+                    .transaction { $0.animation = nil }
                 Text(time(controller.duration)).font(.caption2).monospacedDigit().fixedSize()
                 Button {
                     interaction(.activity)
@@ -171,6 +179,7 @@ struct PlaybackTransportControls: View {
         .foregroundStyle(.white).padding(.horizontal, 12).padding(.vertical, 8)
         .background(.black.opacity(0.65))
         .onChange(of: playbackRate) { interaction(.activity) }
+        .onDisappear { scrub.reset(); interaction(.ended) }
     }
     private var transportButtons: some View {
         HStack(spacing: 0) {

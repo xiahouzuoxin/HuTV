@@ -18,6 +18,7 @@ struct PlayerPage<Content: View>: View {
     private var isFullscreen: Bool { fullscreen?.wrappedValue ?? true }
     private let content: (Binding<Bool>) -> Content
     @Environment(\.dismiss) private var dismiss
+    @State private var reloadRevision = 0
     @State private var controlsVisible = false
     @State private var interacting = false
     @GestureState private var headerTouch = false
@@ -38,6 +39,7 @@ struct PlayerPage<Content: View>: View {
     var body: some View {
         player
         .background(isFullscreen ? Color.black : Color(.systemBackground))
+        .environment(\.playerReloadRevision, reloadRevision)
         .environment(\.playerFullscreen, isFullscreen)
         .environment(\.playerToggleFullscreen, {
             if isFullscreen { onExitFullscreen() }
@@ -71,7 +73,7 @@ struct PlayerPage<Content: View>: View {
                     Button(action: onSwitchSource) {
                         Label("切换源", systemImage: "arrow.triangle.swap").font(.subheadline)
                     }
-                    PlayerSettingsMenu(kind: kind)
+                    PlayerSettingsMenu(kind: kind, onReload: { registerInteraction(.activity); reloadRevision += 1 })
                 }
                 .foregroundStyle(.white).padding()
                 .background(LinearGradient(colors: [.black.opacity(0.7), .clear], startPoint: .top, endPoint: .bottom))
@@ -107,13 +109,15 @@ struct PlayerPage<Content: View>: View {
 
 private struct PlayerSettingsMenu: View {
     let kind: PlayerPageKind
+    let onReload: () -> Void
     @Environment(\.playerControlsInteraction) private var interaction
     @AppStorage("playback.engine") private var engine: PlaybackEngine = .avPlayer
     @AppStorage("playback.autoAdvance") private var autoAdvance = true
-    @AppStorage("playback.forwardBufferSeconds") private var bufferSeconds = 30.0
+    @AppStorage("playback.forwardBufferSeconds") private var bufferSeconds = 0.0
 
     var body: some View {
         Menu {
+            Button("重新加载", systemImage: "arrow.clockwise", action: onReload)
             Picker("播放内核", selection: $engine) {
                 ForEach(PlaybackEngine.allCases) { Text($0.label).tag($0) }
             }

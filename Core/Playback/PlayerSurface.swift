@@ -6,6 +6,7 @@ import SwiftUI
 struct PlayerSurface: UIViewControllerRepresentable {
     let player: AVPlayer?
     var scaling: PlaybackScaling = .fit
+    var controlsVisible = false
     let onTap: () -> Void
     let onDoubleTap: () -> Void
     let onPan: (UIGestureRecognizer.State, CGPoint, CGPoint, CGSize) -> Void
@@ -22,6 +23,7 @@ struct PlayerSurface: UIViewControllerRepresentable {
     func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {
         controller.videoGravity = scaling.gravity
         if controller.player !== player { controller.player = player }
+        context.coordinator.controlsVisible = controlsVisible
         context.coordinator.onPan = onPan
         context.coordinator.onTap = onTap
         context.coordinator.onDoubleTap = onDoubleTap
@@ -33,6 +35,7 @@ struct PlayerSurface: UIViewControllerRepresentable {
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         weak var vlcPlayer: VLCMediaPlayer?
         var scalingSignature = ""
+        var controlsVisible = false
         var onPan: (UIGestureRecognizer.State, CGPoint, CGPoint, CGSize) -> Void
         var onTap: () -> Void
         var onDoubleTap: () -> Void
@@ -63,7 +66,11 @@ struct PlayerSurface: UIViewControllerRepresentable {
         func gestureRecognizer(_ gesture: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
             guard let view = gesture.view else { return false }
             let point = touch.location(in: view)
-            guard point.y > 72, point.y < view.bounds.height - 88 else { return false }
+            if controlsVisible {
+                let top = min(72, view.bounds.height * 0.2)
+                let bottom = min(88, view.bounds.height * 0.25)
+                guard point.y > top, point.y < view.bounds.height - bottom else { return false }
+            }
             var target = touch.view
             while let current = target, current !== view {
                 if current is UIControl { return false }

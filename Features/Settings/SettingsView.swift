@@ -4,7 +4,7 @@ struct SettingsView: View {
     @Environment(WarehouseStore.self) private var store
     @AppStorage("playback.engine") private var engine: PlaybackEngine = .avPlayer
     @AppStorage("playback.autoAdvance") private var autoAdvance = true
-    @AppStorage("playback.forwardBufferSeconds") private var bufferSeconds = 30.0
+    @AppStorage("playback.forwardBufferSeconds") private var bufferSeconds = 0.0
     @AppStorage("playback.rate") private var rate = 1.0
     @AppStorage("playback.scaling") private var scaling: PlaybackScaling = .fit
     @AppStorage("subscriptions.autoRefresh") private var autoRefresh = false

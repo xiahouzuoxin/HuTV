@@ -12,6 +12,8 @@ final class OnDemandPlaybackSession {
     private(set) var startPosition: Double
     private(set) var position: Double
     private(set) var duration = 0.0
+    private(set) var isResolving = false
+    var resolutionError: String?
     private(set) var episodeStart: Double
 
     init(item: MediaItem, source: TVBoxSite, episodes: [MediaEpisode], selected: MediaEpisode, position: Double, episodeStart: Double = 0) {
@@ -49,6 +51,27 @@ final class OnDemandPlaybackSession {
     @discardableResult func retreat(before id: String) -> Bool {
         guard queue.retreat(before: id) else { return false }
         resetEpisodePosition(); return true
+    }
+
+    @discardableResult
+    func move(by offset: Int, provider: (any ContentProvider)? = nil) async -> Bool {
+        let index = queue.index + offset
+        guard !isResolving, queue.episodes.indices.contains(index) else { return false }
+        isResolving = true; resolutionError = nil
+        defer { isResolving = false }
+        let run = revision
+        let oldItem = item, oldSource = source
+        do {
+            let (detail, episode) = try await EpisodeResolver.resolve(item: oldItem, source: oldSource,
+                episode: queue.episodes[index], provider: provider)
+            guard !Task.isCancelled, revision == run else { return false }
+            select(item: oldItem, source: oldSource, episodes: detail.episodes, episode: episode,
+                   keepPosition: false, episodeStart: episodeStart)
+            return true
+        } catch {
+            if !Task.isCancelled, revision == run { resolutionError = "获取最新播放地址失败：\(error.localizedDescription)" }
+            return false
+        }
     }
 
     func setEpisodeStart(_ seconds: Double) { episodeStart = Self.validStart(seconds) }

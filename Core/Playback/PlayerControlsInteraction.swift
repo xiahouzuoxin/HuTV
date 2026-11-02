@@ -31,3 +31,11 @@ extension EnvironmentValues {
         set { self[PlayerToggleFullscreenKey.self] = newValue }
     }
 }
+
+private struct PlayerReloadRevisionKey: EnvironmentKey { static let defaultValue = 0 }
+extension EnvironmentValues {
+    var playerReloadRevision: Int {
+        get { self[PlayerReloadRevisionKey.self] }
+        set { self[PlayerReloadRevisionKey.self] = newValue }
+    }
+}

@@ -10,6 +10,9 @@ struct LivePlayerView: View {
     @State private var playbackRevision = UUID()
     @State private var showingSourcePicker = false
     @State private var recorded = false
+    @State private var epgDay = ""
+    @State private var epgKey = ""
+    @State private var epgCache: [EPGProgram] = []
     @State private var programs: [EPGProgram] = []
 
     var body: some View {
@@ -27,6 +30,12 @@ struct LivePlayerView: View {
                         history.record(.live(channel: channel, source: source), position: 0, duration: 0)
                         recorded = true
                     }
+                }, isLive: true, onReload: {
+                    let channels = try await LivePlaylistLoader().load(from: source)
+                    guard let fresh = channels.first(where: { $0.id == channel.id || ($0.name == channel.name && $0.group == channel.group) }),
+                          !fresh.streams.isEmpty else { throw LivePlaylistError.emptyPlaylist }
+                    let stream = fresh.streams[min(selectedLine, fresh.streams.count - 1)]
+                    return PlaybackResource(url: stream.url, headers: stream.headers)
                 })
                 .id(run)
             } else {
@@ -36,7 +45,12 @@ struct LivePlayerView: View {
                     .onTapGesture { withAnimation { controls.wrappedValue.toggle() } }
             }
         }
-        .task(id: run) { await loadEPG(channel: channel, source: source) }
+        .task(id: run) {
+            while !Task.isCancelled {
+                await loadEPG(channel: channel, source: source)
+                do { try await Task.sleep(for: .seconds(60)) } catch { return }
+            }
+        }
         .sheet(isPresented: $showingSourcePicker) {
             LiveSourcePicker(channel: channel, source: source, selectedLine: selectedLine) { selection in
                 guard selection.channel.streams.indices.contains(selection.line) else { return }
@@ -52,15 +66,20 @@ struct LivePlayerView: View {
     }
 
     @MainActor private func loadEPG(channel: LiveChannel, source: TVBoxLive) async {
-        programs = []
         guard let template = source.epg, !template.isEmpty else { return }
-        let loaded = (try? await EPGLoader().load(template: template, channelName: channel.name)) ?? []
-        guard !Task.isCancelled else { return }
+        let day = Date().formatted(.iso8601.year().month().day().dateSeparator(.dash))
+        let key = template + "|" + channel.name
+        if epgDay != day || epgKey != key {
+            let loaded = (try? await EPGLoader().load(template: template, channelName: channel.name)) ?? []
+            guard !Task.isCancelled else { return }
+            epgCache = loaded; epgDay = day; epgKey = key
+        }
+        let loaded = epgCache
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
         let now = formatter.string(from: .now)
         if let index = loaded.firstIndex(where: { $0.start <= now && now < $0.end }) {
             programs = Array(loaded[index...])
-        } else { programs = loaded }
+        } else { programs = loaded.filter { $0.start > now } }
     }
 }

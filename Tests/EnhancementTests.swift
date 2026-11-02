@@ -25,15 +25,38 @@ private struct LimitedProvider: ContentProvider {
 }
 private struct DetailClient: HTTPDataLoading {
     func data(for request: URLRequest, maximumBytes: Int, additionalValidStatusCodes: Set<Int>) async throws -> (Data, HTTPURLResponse) {
-        let body = #"{"list":[{"vod_id":1,"vod_name":"测试","vod_year":2025,"vod_area":"中国","vod_director":"导演","vod_actor":"甲,乙","type_name":"剧情","vod_content":"<p>简介</p>","vod_play_from":"线路","vod_play_url":"第一集$https://example.com/1.m3u8"}]}"#
+        let body = #"{"list":[{"vod_id":1,"vod_name":"测试","vod_year":2025,"vod_score":7.2,"vod_douban_score":"8.6","vod_lang":"汉语","vod_pubdate":"2025-01-01","vod_duration":"45分钟","vod_area":"中国","vod_director":"导演","vod_actor":"甲,乙","type_name":"剧情","vod_content":"<p>简介</p>","vod_play_from":"线路","vod_play_url":"第一集$https://example.com/1.m3u8"}]}"#
         return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
     }
 }
 
 final class EnhancementTests: XCTestCase {
+
+    func testRatingValidationAndLegacyHistoryDecoding() throws {
+        for value in ["", "0", "-1", "11", "NaN", "暂无评分"] {
+            XCTAssertNil(MediaRating(raw: value, source: "源评分"))
+        }
+        let vod = try JSONDecoder().decode(CMSVod.self, from: Data(#"{"vod_score":"7.5","vod_douban_score":0}"#.utf8))
+        XCTAssertEqual(vod.rating?.value, 7.5)
+        XCTAssertEqual(vod.rating?.source, "源评分")
+        let missing = try JSONDecoder().decode(CMSVod.self, from: Data(#"{"vod_score":null}"#.utf8))
+        XCTAssertNil(missing.rating)
+        let item = try JSONDecoder().decode(MediaItem.self, from: Data(#"{"id":"a","sourceID":"s","title":"旧记录","detailID":"1"}"#.utf8))
+        XCTAssertNil(item.rating)
+        var rated = item
+        rated.rating = vod.rating
+        XCTAssertEqual(try JSONDecoder().decode(MediaItem.self, from: JSONEncoder().encode(rated)), rated)
+    }
+
     func testDetailMetadataAndMissingFields() async throws {
         let provider = StandardCMSProvider(id: "test", source: TVBoxSite(key: "test", name: "test", api: "https://example.com"), client: DetailClient())
         let detail = try await provider.detail(id: "1")
+        XCTAssertEqual(detail.rating?.value, 8.6)
+        XCTAssertEqual(detail.language, "汉语")
+        XCTAssertEqual(detail.releaseDate, "2025-01-01")
+        XCTAssertEqual(detail.runningTime, "45分钟")
+        let items = try await provider.items(categoryID: nil, page: 1)
+        XCTAssertEqual(items.first?.rating, detail.rating)
         XCTAssertEqual(detail.director, "导演")
         XCTAssertEqual(detail.actors, "甲,乙")
         XCTAssertEqual(detail.category, "剧情")

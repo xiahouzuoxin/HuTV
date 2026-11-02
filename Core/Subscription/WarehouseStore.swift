@@ -171,10 +171,21 @@ final class WarehouseStore {
             }
             catch { if !Task.isCancelled { failures.append("JSON 列表：\(error.localizedDescription)") } }
         }
-        for warehouse in warehouses {
-            if Task.isCancelled { break }
-            do { try await refresh(id: warehouse.id) }
-            catch { if !Task.isCancelled { failures.append("\(warehouse.name)：\(error.localizedDescription)") } }
+        let snapshot = warehouses
+        await withTaskGroup(of: String?.self) { tasks in
+            var iterator = snapshot.makeIterator()
+            func enqueue(_ warehouse: Warehouse) {
+                tasks.addTask {
+                    do { try await self.refresh(id: warehouse.id); return nil }
+                    catch { return Task.isCancelled ? nil : "\(warehouse.name)：\(error.localizedDescription)" }
+                }
+            }
+            for _ in 0..<4 { if let warehouse = iterator.next() { enqueue(warehouse) } }
+            for await error in tasks {
+                if Task.isCancelled { tasks.cancelAll(); break }
+                if let error { failures.append(error) }
+                if let warehouse = iterator.next() { enqueue(warehouse) }
+            }
         }
         lastRefreshErrors = failures
         return failures

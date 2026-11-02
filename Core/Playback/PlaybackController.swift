@@ -10,6 +10,9 @@ final class PlaybackController: ObservableObject {
     let vlcDrawable = UIView()
     @Published private(set) var isPaused = false
     @Published private(set) var ready = false
+    @Published private(set) var needsRecovery = false
+    private(set) var wantsToPlay = true
+    private var stallMonitor = PlaybackStallMonitor()
     @Published private(set) var isBuffering = true
     @Published private(set) var bufferedAhead = 0.0
     @Published private(set) var bufferedRanges: [ClosedRange<Double>] = []
@@ -82,6 +85,10 @@ final class PlaybackController: ObservableObject {
     private var asset: AVURLAsset?
     private var awakeOwner: UUID?
     private var foreground = true
+    private var backgroundSuspended = false
+    private let backgroundBuffer = BackgroundBufferLease()
+    private var foregroundBufferDuration = 0.0
+    private var backgroundBufferTarget = 30.0
     private(set) var playbackRate: Float = 1
 
     func setRate(_ value: Double) {
@@ -94,12 +101,14 @@ final class PlaybackController: ObservableObject {
     private var vlcStateObserver: NSObjectProtocol?
 
     func start(resource: PlaybackResource, position: Double, buffer: Double, volume: Double = 1,
-               onProgress: ((Double, Double) -> Void)?, onEnded: (() -> Void)?, engine: PlaybackEngine = .avPlayer) async {
+               onProgress: ((Double, Double) -> Void)?, onEnded: (() -> Void)?, engine: PlaybackEngine = .avPlayer, paused: Bool = false) async {
         if engine == .vlc {
-            await startVLC(resource: resource, position: position, buffer: buffer, volume: volume, onProgress: onProgress, onEnded: onEnded)
+            await startVLC(resource: resource, position: position, buffer: buffer, volume: volume, onProgress: onProgress, onEnded: onEnded, paused: paused)
             return
         }
         stop()
+        wantsToPlay = !paused
+        foregroundBufferDuration = max(0, buffer)
         let run = generation
         progress = onProgress; ended = onEnded
         ready = false; isBuffering = true; bufferedAhead = 0; errorMessage = nil
@@ -144,29 +153,37 @@ final class PlaybackController: ObservableObject {
         item.preferredForwardBufferDuration = max(0, buffer)
         ready = true
         discoverAVQuality(asset: asset, run: run)
-        playback.play()
+        if wantsToPlay && !backgroundSuspended { playback.play() } else { playback.pause(); isPaused = !wantsToPlay }
         saveProgress()
         var ticks = 0
         while generation == run, !Task.isCancelled {
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
             guard generation == run, !Task.isCancelled else { return }
-            isPaused = ready && playback.timeControlStatus == .paused && !reportedEnd
+            let pausedNow = ready && !wantsToPlay && !reportedEnd
+            if isPaused != pausedNow { isPaused = pausedNow }
             updateAwake(playback.timeControlStatus != .paused)
-            isBuffering = playback.timeControlStatus == .waitingToPlayAtSpecifiedRate || seeking
+            let bufferingNow = playback.timeControlStatus == .waitingToPlayAtSpecifiedRate || seeking
+            if isBuffering != bufferingNow { isBuffering = bufferingNow }
             let current = playback.currentTime().seconds
-            bufferedRanges = item.loadedTimeRanges.compactMap { value -> ClosedRange<Double>? in
+            let ranges = item.loadedTimeRanges.compactMap { value -> ClosedRange<Double>? in
                 let range = value.timeRangeValue
                 let start = range.start.seconds, end = CMTimeRangeGetEnd(range).seconds
                 guard start.isFinite, end.isFinite, end >= start, start >= 0 else { return nil }
                 return start...end
             }
-            bufferedAhead = item.loadedTimeRanges.compactMap { value -> Double? in
+            if ranges != bufferedRanges { bufferedRanges = ranges }
+            let ahead = item.loadedTimeRanges.compactMap { value -> Double? in
                 let range = value.timeRangeValue
                 let start = range.start.seconds, end = CMTimeRangeGetEnd(range).seconds
                 guard start.isFinite, end.isFinite, current.isFinite,
                       start <= current + 0.1, end >= current else { return nil }
                 return max(0, end - current)
             }.max() ?? 0
+            if abs(ahead - bufferedAhead) >= 0.25 || (ahead == 0 && bufferedAhead != 0) { bufferedAhead = ahead }
+            if backgroundBuffer.isActive, (errorMessage != nil || reportedEnd || bufferedAhead >= backgroundBufferTarget) {
+                backgroundBuffer.finish()
+            }
+            if detectStall() { playback.pause(); return }
             if item.status == .failed {
                 saveProgress()
                 fail(message(for: item.error, fallback: "播放中断"), player: playback)
@@ -179,7 +196,9 @@ final class PlaybackController: ObservableObject {
     }
 
     func stop() {
+        backgroundBuffer.finish()
         saveProgress()
+        needsRecovery = false; stallMonitor = PlaybackStallMonitor()
         qualityTask?.cancel(); qualityTask = nil
         qualityOptions = []; selectedQualityID = nil; detectingQuality = false; defaultVLCVideoTrack = nil
         generation = UUID()
@@ -235,10 +254,10 @@ final class PlaybackController: ObservableObject {
     func togglePlay() {
         guard ready, errorMessage == nil else { return }
         if let vlcPlayer {
-            isPaused.toggle()
+            wantsToPlay.toggle(); isPaused = !wantsToPlay
             isPaused ? vlcPlayer.pause() : vlcPlayer.play()
         } else if let player {
-            isPaused = player.timeControlStatus != .paused
+            wantsToPlay.toggle(); isPaused = !wantsToPlay
             isPaused ? player.pause() : player.play()
         }
         updateAwake(!isPaused)
@@ -285,13 +304,42 @@ final class PlaybackController: ObservableObject {
         if succeeded {
             errorMessage = nil
             saveProgress()
-            if shouldPlay { player.play() }
+            if shouldPlay && !backgroundSuspended { player.play() }
         } else { errorMessage = "跳转未完成，请重试。" }
     }
 
     func setForeground(_ active: Bool) {
         foreground = active
+        if active {
+            backgroundBuffer.finish()
+            let resume = backgroundSuspended
+            backgroundSuspended = false
+            if resume, (wantsToPlay || !ready), !reportedEnd, errorMessage == nil {
+                player?.play(); vlcPlayer?.play()
+            }
+        }
         updateAwake(active && (player != nil || vlcPlayer != nil) && errorMessage == nil && (!ready || isPlaying || isBuffering))
+    }
+
+    func enterBackground(allowBuffering: Bool) {
+        guard !backgroundSuspended else { return }
+        backgroundSuspended = true
+        setForeground(false)
+        saveProgress()
+        player?.pause(); vlcPlayer?.pause()
+        // A live buffer would become stale; startup is left for the foreground.
+        guard allowBuffering, ready, !reportedEnd, errorMessage == nil else { return }
+        backgroundBufferTarget = min(60, max(30, foregroundBufferDuration))
+        if duration > position { backgroundBufferTarget = min(backgroundBufferTarget, duration - position) }
+        if player != nil, bufferedAhead >= backgroundBufferTarget { return }
+        backgroundBuffer.start { [weak self] in
+            guard let self else { return }
+            self.player?.currentItem?.preferredForwardBufferDuration = self.foregroundBufferDuration
+            self.saveProgress()
+        }
+        if backgroundBuffer.isActive {
+            player?.currentItem?.preferredForwardBufferDuration = backgroundBufferTarget
+        }
     }
 
     private func updateAwake(_ needed: Bool) {
@@ -304,10 +352,14 @@ final class PlaybackController: ObservableObject {
         }
     }
 
-    func setBuffer(_ seconds: Double) { player?.currentItem?.preferredForwardBufferDuration = max(0, seconds) }
+    func setBuffer(_ seconds: Double) {
+        foregroundBufferDuration = max(0, seconds)
+        if !backgroundBuffer.isActive { player?.currentItem?.preferredForwardBufferDuration = foregroundBufferDuration }
+    }
 
     func didEnd(_ item: AVPlayerItem) {
         guard item === player?.currentItem, ready, !reportedEnd else { return }
+        backgroundBuffer.finish()
         reportedEnd = true
         updateAwake(false)
         isBuffering = false
@@ -327,7 +379,19 @@ final class PlaybackController: ObservableObject {
         return result
     }
 
+    private func detectStall() -> Bool {
+        guard stallMonitor.stalled(position: position, now: ProcessInfo.processInfo.systemUptime,
+            monitoring: ready && wantsToPlay && foreground && !seeking && !reportedEnd) else { return false }
+        saveProgress()
+        errorMessage = "播放已停滞 30 秒，请重新加载或切换线路。"
+        isBuffering = false
+        updateAwake(false)
+        needsRecovery = true
+        return true
+    }
+
     private func fail(_ message: String, player: AVPlayer) {
+        backgroundBuffer.finish()
         errorMessage = message
         updateAwake(false)
         isBuffering = false
@@ -346,6 +410,7 @@ extension PlaybackController {
         guard vlcPlayer != nil, !reportedEnd else { return }
         saveProgress()
         if duration > 0 { lastPosition = duration; lastDuration = duration; progress?(duration, duration) }
+        backgroundBuffer.finish()
         reportedEnd = true
         isBuffering = false
         updateAwake(false)
@@ -353,8 +418,10 @@ extension PlaybackController {
     }
 
     private func startVLC(resource: PlaybackResource, position: Double, buffer: Double, volume: Double,
-                          onProgress: ((Double, Double) -> Void)?, onEnded: (() -> Void)?) async {
+                          onProgress: ((Double, Double) -> Void)?, onEnded: (() -> Void)?, paused: Bool) async {
         stop()
+        wantsToPlay = !paused
+        foregroundBufferDuration = max(0, buffer)
         let run = generation
         progress = onProgress; ended = onEnded
         ready = false; isBuffering = true; bufferedAhead = 0; errorMessage = nil
@@ -397,9 +464,11 @@ extension PlaybackController {
         while generation == run, !Task.isCancelled {
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
             guard generation == run, !Task.isCancelled else { return }
-            isPaused = ready && playback.state == .paused && !reportedEnd
+            let pausedNow = ready && !wantsToPlay && !reportedEnd
+            if isPaused != pausedNow { isPaused = pausedNow }
             switch playback.state {
             case .error:
+                backgroundBuffer.finish()
                 saveProgress()
                 errorMessage = "VLC 无法打开此媒体，请重试或切换线路/内核。"
                 playback.stop(); isBuffering = false; updateAwake(false)
@@ -411,10 +480,10 @@ extension PlaybackController {
                 return
             case .playing, .paused:
                 if playback.rate != playbackRate { playback.rate = playbackRate }
-                isBuffering = false
+                if isBuffering { isBuffering = false }
                 if playback.isPlaying { reportedEnd = false }
             case .opening, .buffering:
-                isBuffering = true
+                if !isBuffering { isBuffering = true }
             default: break
             }
             let mediaTime = Double(playback.time.intValue) / 1000
@@ -434,8 +503,11 @@ extension PlaybackController {
                         return
                     }
                 } else {
-                    ready = true
-                    isBuffering = false
+                    if !ready {
+                        ready = true
+                        if !wantsToPlay || backgroundSuspended { playback.pause(); isPaused = !wantsToPlay }
+                    }
+                    if isBuffering { isBuffering = false }
                 }
             }
             if !ready && ContinuousClock.now >= deadline {
@@ -443,7 +515,8 @@ extension PlaybackController {
                 playback.stop(); isBuffering = false; updateAwake(false)
                 return
             }
-            if ready && ticks % 4 == 0 { discoverVLCQuality(playback) }
+            if detectStall() { playback.pause(); return }
+            if ready && (defaultVLCVideoTrack == nil || ticks % 40 == 0) { discoverVLCQuality(playback) }
             updateAwake(!ready || playback.isPlaying || isBuffering)
             ticks += 1
             if ticks % 8 == 0 { saveProgress() }

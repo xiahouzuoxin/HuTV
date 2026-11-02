@@ -11,12 +11,11 @@ iPhone / iPad 原生视频订阅客户端，支持 CMS JSON 点播、M3U / TXT �
 
 详细操作和播放行为见[功能说明](Docs/Features.md)。
 
-### 页面预览
+### 操作演示
 
-| 订阅 | 搜索 | 历史 | 设置 |
-|:---:|:---:|:---:|:---:|
-| [<img src="Docs/Images/subscriptions.png" alt="订阅页面" width="200">](Docs/Images/subscriptions.png) | [<img src="Docs/Images/search.png" alt="搜索页面" width="200">](Docs/Images/search.png) | [<img src="Docs/Images/history.png" alt="观看历史页面" width="200">](Docs/Images/history.png) | [<img src="Docs/Images/settings.png" alt="设置页面" width="200">](Docs/Images/settings.png) |
+[观看 App 操作演示视频](Docs/Videos/HuTV-demo.mp4)
 
+iPhone 17 Pro 模拟器录制（iOS 26.4，约 4 倍速，19 秒），展示订阅、设置、观看历史、豆瓣热门、搜索、影片详情和播放操作。
 
 ## 订阅
 

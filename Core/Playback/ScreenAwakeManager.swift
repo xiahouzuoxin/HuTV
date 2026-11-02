@@ -18,7 +18,7 @@ final class ScreenAwakeManager {
         owners.insert(owner)
         return owner
     }
-    func refresh() { if !owners.isEmpty { write(true) } }
+    func refresh() { if !owners.isEmpty && !read() { write(true) } }
     func release(_ owner: UUID) {
         guard owners.remove(owner) != nil else { return }
         if owners.isEmpty { write(previous) }

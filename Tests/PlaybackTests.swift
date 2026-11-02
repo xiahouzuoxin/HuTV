@@ -52,6 +52,11 @@ final class PlaybackTests: XCTestCase {
         controller.setRate(1)
         try await Task.sleep(for: .milliseconds(300))
         XCTAssertFalse(controller.bufferedRanges.isEmpty)
+        controller.enterBackground(allowBuffering: false)
+        XCTAssertEqual(controller.player?.rate, 0)
+        XCTAssertTrue(controller.wantsToPlay)
+        controller.setForeground(true)
+        XCTAssertEqual(controller.player?.rate, 1)
         let oldSeek = Task { await controller.seek(to: 0.5) }
         await Task.yield()
         let latestSeek = Task { await controller.seek(to: 1.25) }
@@ -68,8 +73,15 @@ final class PlaybackTests: XCTestCase {
         let saved = positions.last!
         positions = []
         let second = Task { await controller.start(resource: PlaybackResource(url: url), position: saved, buffer: 30,
-            onProgress: { position, _ in positions.append(position) }, onEnded: nil) }
+            onProgress: { position, _ in positions.append(position) }, onEnded: nil, paused: true) }
         try await waitUntilReady(controller)
+        XCTAssertTrue(controller.isPaused)
+        XCTAssertFalse(controller.wantsToPlay)
+        XCTAssertEqual(controller.player?.rate, 0)
+        controller.enterBackground(allowBuffering: true)
+        controller.setForeground(true)
+        XCTAssertEqual(controller.player?.rate, 0, "Background buffering must preserve a user's pause")
+        XCTAssertEqual(controller.player?.currentItem?.preferredForwardBufferDuration, 30)
         XCTAssertFalse(controller.player === oldPlayer)
         XCTAssertGreaterThanOrEqual(controller.position, 1)
         XCTAssertTrue(positions.allSatisfy { $0 >= 1 })
@@ -105,10 +117,14 @@ final class PlaybackTests: XCTestCase {
         var progress: Double = 0
         let task = Task {
             await controller.start(resource: PlaybackResource(url: url), position: 1.25, buffer: 30,
-                onProgress: { seconds, _ in progress = seconds }, onEnded: { ended = true }, engine: .vlc)
+                onProgress: { seconds, _ in progress = seconds }, onEnded: { ended = true }, engine: .vlc, paused: true)
         }
         try await waitUntilReady(controller)
         XCTAssertNotNil(controller.vlcPlayer)
+        XCTAssertTrue(controller.isPaused)
+        XCTAssertFalse(controller.wantsToPlay)
+        controller.togglePlay()
+        XCTAssertTrue(controller.wantsToPlay)
         controller.setRate(1.5)
         XCTAssertEqual(controller.vlcPlayer?.rate, 1.5)
         controller.setRate(1)

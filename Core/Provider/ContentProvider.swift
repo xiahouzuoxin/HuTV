@@ -6,6 +6,7 @@ struct MediaItem: Codable, Identifiable, Hashable, Sendable {
     let title: String
     let posterURL: URL?
     let detailID: String
+    var rating: MediaRating? = nil
 }
 
 struct MediaCategory: Identifiable, Hashable, Sendable {
@@ -34,7 +35,11 @@ struct MediaDetail: Identifiable, Hashable, Sendable {
     let episodes: [MediaEpisode]
     var director: String = ""
     var actors: String = ""
+    var language: String = ""
+    var releaseDate: String = ""
+    var runningTime: String = ""
     var category: String = ""
+    var rating: MediaRating? = nil
 }
 
 protocol ContentProvider: Sendable {
@@ -50,5 +55,19 @@ enum ContentProviderFactory {
     static func make(for site: TVBoxSite, namespace: String? = nil) -> (any ContentProvider)? {
         guard site.runtime == .nativeAPI else { return nil }
         return StandardCMSProvider(id: [namespace, site.key].compactMap { $0 }.joined(separator: "/"), source: site)
+    }
+}
+
+/// Ratings are supplied by the subscription, including any claimed Douban score.
+struct MediaRating: Codable, Hashable, Sendable {
+    let value: Double
+    let source: String
+    var text: String { String(format: "%.1f", value) }
+
+    init?(raw: String, source: String) {
+        guard let value = Double(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+              value.isFinite, value > 0, value <= 10 else { return nil }
+        self.value = value
+        self.source = source
     }
 }

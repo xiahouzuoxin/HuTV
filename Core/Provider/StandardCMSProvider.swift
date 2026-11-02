@@ -68,13 +68,14 @@ struct StandardCMSProvider: ContentProvider {
             summary: vod.content.removingHTML,
             metadata: [vod.year, vod.area, vod.remarks].filter { !$0.isEmpty }.joined(separator: " · "),
             episodes: episodes, director: vod.director.removingHTML,
-            actors: vod.actors.removingHTML, category: vod.category.removingHTML
+            actors: vod.actors.removingHTML, language: vod.language.removingHTML,
+            releaseDate: vod.releaseDate.removingHTML, runningTime: vod.runningTime.removingHTML, category: vod.category.removingHTML, rating: vod.rating
         )
     }
 
     private func mediaItem(_ vod: CMSVod) -> MediaItem {
         MediaItem(id: "\(id)|\(vod.id)", sourceID: id, title: vod.name,
-                  posterURL: URL(string: vod.picture), detailID: vod.id)
+                  posterURL: URL(string: vod.picture), detailID: vod.id, rating: vod.rating)
     }
 
     private func request<T: Decodable>(_ query: [String: String]) async throws -> T {
@@ -139,12 +140,18 @@ struct CMSVod: Decodable {
     let category: String
     let playFrom: String
     let playURL: String
+    let language: String
+    let releaseDate: String
+    let runningTime: String
+    let rating: MediaRating?
 
     enum CodingKeys: String, CodingKey {
         case id = "vod_id", name = "vod_name", picture = "vod_pic", remarks = "vod_remarks"
         case year = "vod_year", area = "vod_area", content = "vod_content"
         case director = "vod_director", actors = "vod_actor", category = "type_name"
         case playFrom = "vod_play_from", playURL = "vod_play_url"
+        case score = "vod_score", doubanScore = "vod_douban_score"
+        case language = "vod_lang", releaseDate = "vod_pubdate", runningTime = "vod_duration"
     }
 
     init(from decoder: Decoder) throws {
@@ -161,6 +168,12 @@ struct CMSVod: Decodable {
         content = box.flexibleString(.content)
         playFrom = box.flexibleString(.playFrom)
         playURL = box.flexibleString(.playURL)
+        language = box.flexibleString(.language)
+        releaseDate = box.flexibleString(.releaseDate)
+        let duration = box.flexibleString(.runningTime).trimmingCharacters(in: .whitespacesAndNewlines)
+        runningTime = duration == "0" ? "" : duration
+        rating = MediaRating(raw: box.flexibleString(.doubanScore), source: "豆瓣评分（源提供）")
+            ?? MediaRating(raw: box.flexibleString(.score), source: "源评分")
     }
 }
 

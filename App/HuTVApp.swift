@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct HuTVApp: App {
+    @Environment(\.scenePhase) private var scenePhase
     @State private var sessionID = UUID()
     @State private var store = WarehouseStore()
 
@@ -13,6 +14,9 @@ struct HuTVApp: App {
                 .environment(store)
                 .environment(history)
                 .id(sessionID)
+                .onChange(of: scenePhase) { _, phase in
+                    if phase != .active { history.flushPending() }
+                }
                 .onReceive(NotificationCenter.default.publisher(for: AppMaintenance.didReset)) { _ in
                     store.retire(); history.retire()
                     store = WarehouseStore()

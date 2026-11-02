@@ -126,7 +126,8 @@ private struct AlternateLiveSources: View {
             let candidates = sources
             groups = candidates
             await withTaskGroup(of: LiveSourceGroup.self) { tasks in
-                for candidate in candidates {
+                var iterator = candidates.makeIterator()
+                func enqueue(_ candidate: LiveSourceGroup) {
                     tasks.addTask {
                         var result = candidate
                         do { result.channels = try await LivePlaylistLoader().load(from: candidate.source) }
@@ -135,9 +136,11 @@ private struct AlternateLiveSources: View {
                         return result
                     }
                 }
+                for _ in 0..<4 { if let candidate = iterator.next() { enqueue(candidate) } }
                 for await result in tasks {
                     guard !Task.isCancelled else { tasks.cancelAll(); return }
                     if let index = groups.firstIndex(where: { $0.id == result.id }) { groups[index] = result }
+                    if let candidate = iterator.next() { enqueue(candidate) }
                 }
             }
         }

@@ -24,6 +24,16 @@ struct NativePlayerView: View {
     var canNext = false
     var episodeStart: Double = 0
     var onSetEpisodeStart: ((Double) -> Void)? = nil
+    var isLive = false
+    var onCheckpoint: (() -> Void)? = nil
+    var onReload: (() async throws -> PlaybackResource)? = nil
+    @Environment(\.playerReloadRevision) private var reloadRevision
+    @State private var reloadedResource: PlaybackResource?
+    @State private var reloadTask: Task<Void, Never>?
+    @State private var reloadError: String?
+    @State private var reloading = false
+    @State private var requestedPaused = false
+    @State private var recoveryAttempts = 0
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.playerControlsInteraction) private var interaction
     @StateObject private var controller = PlaybackController()
@@ -53,10 +63,10 @@ struct NativePlayerView: View {
                     Color.black
                     if engine == .vlc {
                         VLCVideoSurface(player: controller.vlcPlayer, drawable: controller.vlcDrawable,
-                            scaling: scaling, viewport: size, onTap: toggleControls, onDoubleTap: togglePlayback, onPan: handlePan)
+                            scaling: scaling, viewport: size, controlsVisible: controlsVisible, onTap: toggleControls, onDoubleTap: togglePlayback, onPan: handlePan)
                             .frame(width: size.width, height: size.height)
                     } else {
-                        PlayerSurface(player: controller.player, scaling: scaling,
+                        PlayerSurface(player: controller.player, scaling: scaling, controlsVisible: controlsVisible,
                             onTap: toggleControls, onDoubleTap: togglePlayback, onPan: handlePan)
                             .frame(width: size.width, height: size.height)
                     }
@@ -108,9 +118,9 @@ struct NativePlayerView: View {
                         Button(engine == .avPlayer ? "改用 VLC" : "改用 AVPlayer") {
                             engine = engine == .avPlayer ? .vlc : .avPlayer
                         }
-                        Button("重试") { requestedPosition = controller.retryPosition; retryGeneration += 1 }
+                        Button("重试") { reload() }
                         if controller.retryPosition > 0 {
-                            Button("从头播放") { requestedPosition = 0; retryGeneration += 1 }
+                            Button("从头播放") { reload(fromStart: true) }
                         }
                     }.buttonStyle(.borderedProminent)
                 }.foregroundStyle(.white).padding()
@@ -127,10 +137,24 @@ struct NativePlayerView: View {
             if playbackRate > 2 { playbackRate = 2 }
             controller.setRate(playbackRate)
             controller.setForeground(scenePhase == .active)
-            await controller.start(resource: resource, position: requestedPosition ?? startPosition,
+            await controller.start(resource: reloadedResource ?? resource, position: requestedPosition ?? startPosition,
                                    buffer: preferredBufferDuration, volume: volume,
-                                   onProgress: onProgress, onEnded: onEnded, engine: engine)
+                                   onProgress: onProgress, onEnded: onEnded, engine: engine, paused: requestedPaused)
         }
+        .onChange(of: reloadRevision) { _, _ in reload() }
+        .onChange(of: controller.isPaused) { _, paused in if paused { onCheckpoint?() } }
+        .onChange(of: controller.needsRecovery) { _, needed in
+            if needed, recoveryAttempts < 2 {
+                recoveryAttempts += 1
+                reload(automatic: true)
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            if reloading { Text("正在重新加载…").padding().background(.regularMaterial) }
+        }
+        .alert("重新加载失败", isPresented: Binding(get: { reloadError != nil }, set: { if !$0 { reloadError = nil } })) {
+            Button("好") { reloadError = nil }
+        } message: { Text(reloadError ?? "") }
         .onReceive(NotificationCenter.default.publisher(for: AVPlayerItem.didPlayToEndTimeNotification)) {
             if let item = $0.object as? AVPlayerItem { controller.didEnd(item) }
         }
@@ -140,17 +164,41 @@ struct NativePlayerView: View {
         .onChange(of: engine) { _, _ in
             controller.saveProgress()
             requestedPosition = controller.retryPosition
+            requestedPaused = !controller.wantsToPlay
             retryGeneration += 1
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase != .active { controller.saveProgress() }
+            if phase != .active { controller.saveProgress(); onCheckpoint?() }
             controller.setForeground(phase == .active)
+            if phase == .background { controller.enterBackground(allowBuffering: !isLive) }
         }
         .onDisappear {
+            reloadTask?.cancel()
             interaction(.ended)
             controller.stop()
+            onCheckpoint?()
             requestedPosition = controller.retryPosition
             if let originalBrightness { screen.brightness = originalBrightness }
+        }
+    }
+
+    private func reload(fromStart: Bool = false, automatic: Bool = false) {
+        guard !reloading else { return }
+        if !automatic { recoveryAttempts = 0 }
+        reloading = true; reloadError = nil
+        reloadTask = Task {
+            defer { reloading = false }
+            do {
+                let fresh = try await onReload?() ?? resource
+                guard !Task.isCancelled else { return }
+                controller.saveProgress(); onCheckpoint?()
+                requestedPosition = fromStart ? 0 : (isLive ? 0 : controller.retryPosition)
+                requestedPaused = !controller.wantsToPlay
+                reloadedResource = fresh
+                retryGeneration += 1
+            } catch {
+                if !Task.isCancelled { reloadError = error.localizedDescription }
+            }
         }
     }
 

@@ -6,6 +6,7 @@ struct PlaybackSourceSelection {
     let episodes: [MediaEpisode]
     let episode: MediaEpisode
     let keepPosition: Bool
+    var detail: MediaDetail? = nil
 }
 
 struct PlaybackSourcePicker: View {
@@ -16,7 +17,7 @@ struct PlaybackSourcePicker: View {
     let current: MediaEpisode
     let onSelect: (PlaybackSourceSelection) -> Void
     @State private var keepPosition = true
-    @State private var refreshedEpisodes: [MediaEpisode]?
+    @State private var refreshedDetail: MediaDetail?
     @State private var refreshError: String?
     @State private var loading = true
     @State private var refreshID = 0
@@ -37,7 +38,7 @@ struct PlaybackSourcePicker: View {
                             Text("更新失败：\(refreshError)").font(.footnote).foregroundStyle(.secondary)
                             Button("重试更新线路") { refreshID += 1 }
                         }
-                        EpisodeSourceChoices(item: item, source: source, episodes: refreshedEpisodes ?? episodes,
+                        EpisodeSourceChoices(item: item, source: source, episodes: refreshedDetail?.episodes ?? episodes, detail: refreshedDetail,
                                              current: current, keepPosition: $keepPosition, onSelect: onSelect)
                     }
                 }
@@ -55,7 +56,7 @@ struct PlaybackSourcePicker: View {
                 do {
                     let result = try await StandardCMSProvider(id: item.sourceID, source: source).detail(id: item.detailID)
                     guard !Task.isCancelled else { return }
-                    refreshedEpisodes = result.episodes
+                    refreshedDetail = result
                 } catch {
                     if !Task.isCancelled { refreshError = error.localizedDescription }
                 }
@@ -69,6 +70,7 @@ private struct EpisodeSourceChoices: View {
     let item: MediaItem
     let source: TVBoxSite
     let episodes: [MediaEpisode]
+    var detail: MediaDetail? = nil
     let current: MediaEpisode
     @Binding var keepPosition: Bool
     let onSelect: (PlaybackSourceSelection) -> Void
@@ -87,7 +89,7 @@ private struct EpisodeSourceChoices: View {
                         ForEach(episodes.filter { $0.line == line }) { episode in
                             Button {
                                 onSelect(PlaybackSourceSelection(item: item, source: source, episodes: episodes,
-                                                               episode: episode, keepPosition: keepPosition))
+                                                               episode: episode, keepPosition: keepPosition, detail: detail))
                             } label: {
                                 HStack {
                                     Text(episode.name)
@@ -190,7 +192,7 @@ private struct AlternateSourceDetail: View {
                     Text(provider.source.name).font(.caption).foregroundStyle(.secondary)
                 }
                 Section("确认影片后选择线路与集数") {
-                    EpisodeSourceChoices(item: item, source: provider.source, episodes: detail.episodes,
+                    EpisodeSourceChoices(item: item, source: provider.source, episodes: detail.episodes, detail: detail,
                                          current: current, keepPosition: $keepPosition, onSelect: onSelect)
                     if detail.episodes.isEmpty { Text("没有可用集数") }
                 }
