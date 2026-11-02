@@ -95,7 +95,7 @@ xcodebuild -project HuTV.xcodeproj -scheme HuTV \
 ./scripts/package-ipa.sh
 ```
 
-脚本构建 Release、将 VLC 等可执行文件精简为 arm64、移除旧签名并校验，统一输出 `output/HuTV.ipa`。覆盖现有 App 时可用 `HUTV_BUNDLE_ID=已有包标识 ./scripts/package-ipa.sh` 指定 Bundle ID，并沿用 Sideloadly 中的签名账号与最终应用标识。
+项目默认 Bundle ID 为 `com.zuoxin.HuTV`。脚本构建 Release、将 VLC 等可执行文件精简为 arm64、移除旧签名并校验，统一输出 `output/HuTV.ipa`。覆盖现有 App 时可用 `HUTV_BUNDLE_ID=已有包标识 ./scripts/package-ipa.sh` 指定 Bundle ID，并沿用 Sideloadly 中的签名账号与最终应用标识。
 
 首次安装或更新时将该 IPA 导入 Sideloadly，开启自动刷新。日常续签使用其缓存，无需重新打包；更新本地 IPA 后必须重新导入安装，缓存才会更新。主窗口可以关闭，菜单栏 / 托盘后台程序需保持运行；支持 USB 或配置好的同局域网 Wi-Fi 连接。
 

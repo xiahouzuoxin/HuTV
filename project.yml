@@ -1,6 +1,6 @@
 name: HuTV
 options:
-  bundleIdPrefix: com.example
+  bundleIdPrefix: com.zuoxin
   deploymentTarget:
     iOS: "17.0"
 settings:
@@ -38,7 +38,7 @@ targets:
       - Features
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.HuTV
+        PRODUCT_BUNDLE_IDENTIFIER: com.zuoxin.HuTV
         GENERATE_INFOPLIST_FILE: false
         OTHER_LDFLAGS: "$(inherited) -ObjC"
     dependencies:
@@ -77,5 +77,5 @@ targets:
       - target: HuTV
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.HuTVTests
+        PRODUCT_BUNDLE_IDENTIFIER: com.zuoxin.HuTVTests
         GENERATE_INFOPLIST_FILE: true

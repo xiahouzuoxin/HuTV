@@ -13,7 +13,7 @@
 ## 提交前必须补齐
 
 - [ ] 注册并保持有效的 Apple Developer Program 会员；确定 App Store 发布地区。
-- [ ] 确定最终 Bundle ID、开发者团队及 App Store Connect 应用记录。当前 com.example.HuTV 是开发占位值，不用于正式发布。真机曾使用的开发 Bundle ID 也不应无意替换。
+- [ ] 确定最终 Bundle ID、开发者团队及 App Store Connect 应用记录。项目统一使用 `com.zuoxin.HuTV`，需确认该标识在开发者账号中可用。侧载更新须保持签名后的最终 Bundle ID 不变。
 - [ ] 为隐私政策和技术支持提供可公开访问的 HTTPS 网页、发布者身份及有效联系渠道。内置说明不能替代 App Store Connect 的 Privacy Policy URL。把政策末尾的支持指引与实际上线渠道核对。
 - [ ] 核实默认源、演示内容、海报及截图的使用授权。当前保留的默认源尚未完成此项。
 - [ ] 准备获授权且稳定可播放的审核演示内容；审核可完整访问，无隐藏开关或针对审核的不同配置。
