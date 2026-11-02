@@ -13,7 +13,7 @@ iPhone / iPad 原生视频订阅客户端，支持 CMS JSON 点播、M3U / TXT �
 
 ### 操作演示
 
-[观看 App 操作演示视频](Docs/Videos/HuTV-demo.mp4)
+https://github.com/user-attachments/assets/712f49ac-4592-418a-86a8-ecfe9f8152ec
 
 iPhone 17 Pro 模拟器录制（iOS 26.4，约 4 倍速，19 秒），展示订阅、设置、观看历史、豆瓣热门、搜索、影片详情和播放操作。
 
