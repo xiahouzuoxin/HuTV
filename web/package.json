@@ -1,0 +1,34 @@
+{
+  "name": "hutv-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build && node scripts/build-worker.mjs",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "preview": "wrangler dev --port 8787",
+    "deploy": "npm run build && wrangler deploy",
+    "validate": "node scripts/validate-artifact.mjs"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "hls.js": "^1.6.0",
+    "lucide-react": "^0.468.0",
+    "idb": "^8.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0",
+    "vite": "^8.3.5",
+    "@vitejs/plugin-react": "^6.2.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/node": "^22.0.0",
+    "vitest": "^5.1.0",
+    "@playwright/test": "^1.51.0",
+    "esbuild": "^0.28.2",
+    "wrangler": "^4.0.0"
+  }
+}

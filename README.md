@@ -17,6 +17,8 @@ https://github.com/user-attachments/assets/712f49ac-4592-418a-86a8-ecfe9f8152ec
 
 iPhone 17 Pro 模拟器录制（iOS 26.4，约 4 倍速，19 秒），展示订阅、设置、观看历史、豆瓣热门、搜索、影片详情和播放操作。
 
+[在线体验 HuTV Web](https://hutv-web.hutv-web.workers.dev)
+
 ## 订阅
 
 > **订阅资源仅供学习研究用途！**
@@ -103,3 +105,9 @@ xcodebuild -project HuTV.xcodeproj -scheme HuTV \
 - [发布准备清单](Docs/Release/Checklist.md)
 
 隐私说明随 App 打包，可在“设置 → 隐私与数据”查看。发布前需核实默认源的内容授权，并完成相应审核要求。
+
+## Web 版本
+
+[在线体验 HuTV Web](https://hutv-web.hutv-web.workers.dev) · [Web 开发与部署说明](web/README.md)
+
+Web 版本在 `web/` 中独立构建和部署，支持浏览器点播、直播、订阅管理及本地观看记录，播放器使用浏览器原生能力与 HLS.js。iOS 与 Web 的数据和发布流程分别维护。

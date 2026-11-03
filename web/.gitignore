@@ -1,0 +1,9 @@
+dist/
+site.tar.gz
+node_modules/
+client-dist/
+.wrangler/
+test-results/
+playwright-report/
+.openai/local/
+.dev.vars
