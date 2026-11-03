@@ -43,29 +43,55 @@ export function rating(v: Record<string, unknown>): Rating | undefined {
     if (n > 0 && n <= 10) return { value: n, kind };
   }
 }
+export function isM3U8(url: string): boolean {
+  try {
+    return /\.m3u8$/i.test(new URL(url).pathname);
+  } catch {
+    return false;
+  }
+}
+export function prioritizeEpisodes(episodes: Episode[]): Episode[] {
+  const groups = new Map<string, { episodes: Episode[]; rank: number; index: number }>();
+  for (const episode of episodes) {
+    const group = groups.get(episode.line) ?? { episodes: [], rank: 2, index: groups.size };
+    group.episodes.push(episode);
+    const rank = isM3U8(episode.url)
+      ? 0
+      : /\.(mp4|m4v|mov|mp3|m4a)$/i.test(new URL(episode.url).pathname)
+        ? 1
+        : 2;
+    group.rank = Math.min(group.rank, rank);
+    groups.set(episode.line, group);
+  }
+  return [...groups.values()]
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .flatMap((group) => group.episodes);
+}
 export function parseEpisodes(v: Record<string, unknown>): Episode[] {
   const lines = value(v.vod_play_from).split('$$$');
-  return value(v.vod_play_url)
-    .split('$$$')
-    .flatMap((playlist, line) =>
-      playlist.split('#').flatMap((entry, i) => {
-        const at = entry.indexOf('$');
-        if (at < 0) return [];
-        const address = entry.slice(at + 1).trim();
-        try {
-          return [
-            {
-              id: `${line}|${i}|${address}`,
-              name: clean(entry.slice(0, at)) || `第 ${i + 1} 集`,
-              url: httpURL(address),
-              line: lines[line] || `线路 ${line + 1}`,
-            },
-          ];
-        } catch {
-          return [];
-        }
-      }),
-    );
+  return prioritizeEpisodes(
+    value(v.vod_play_url)
+      .split('$$$')
+      .flatMap((playlist, line) =>
+        playlist.split('#').flatMap((entry, i) => {
+          const at = entry.indexOf('$');
+          if (at < 0) return [];
+          const address = entry.slice(at + 1).trim();
+          try {
+            return [
+              {
+                id: `${line}|${i}|${address}`,
+                name: clean(entry.slice(0, at)) || `第 ${i + 1} 集`,
+                url: httpURL(address),
+                line: lines[line] || `线路 ${line + 1}`,
+              },
+            ];
+          } catch {
+            return [];
+          }
+        }),
+      ),
+  );
 }
 export function parseCMS(
   data: unknown,

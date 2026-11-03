@@ -6,6 +6,7 @@ import {
   downloadURL,
   rating,
   parseEpisodes,
+  isM3U8,
 } from '../src/lib/model';
 import { concurrent } from '../src/lib/api';
 import { validateLibrary, initialLibrary } from '../src/lib/store';
@@ -35,6 +36,21 @@ describe('CMS compatibility', () => {
     expect(parsed.items[0].episodes).toHaveLength(3);
     expect(parsed.items[0].rating).toEqual({ value: 8.6, kind: 'douban' });
     expect(parsed.categories[0].id).toBe('2');
+  });
+  it('prioritizes actual M3U8 lines, retaining episode order and stable line ties', () => {
+    const episodes = parseEpisodes({
+      vod_play_from: 'M3U8名称但实际MP4$$$B$$$A$$$网页',
+      vod_play_url:
+        '第1集$https://example.com/1.mp4?next=.m3u8$$$第2集$https://example.com/2.M3U8?token=x#第1集$https://example.com/1.m3u8$$$第1集$https://example.com/a.m3u8$$$第1集$https://example.com/watch',
+    });
+    expect(episodes.map((e) => e.line)).toEqual(['B', 'B', 'A', 'M3U8名称但实际MP4', '网页']);
+    expect(episodes.slice(0, 2).map((e) => e.name)).toEqual(['第2集', '第1集']);
+    expect(isM3U8(episodes[0].url)).toBe(true);
+    expect(isM3U8(episodes[3].url)).toBe(false);
+    expect(
+      parseEpisodes({ vod_play_from: 'MP4', vod_play_url: '全集$https://example.com/v.mp4' })[0]
+        .line,
+    ).toBe('MP4');
   });
   it('rejects HTML and excludes unsafe or non-browser episode URLs', () => {
     expect(() => parseCMS('<html/>', 's')).toThrow();

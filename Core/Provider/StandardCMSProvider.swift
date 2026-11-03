@@ -67,7 +67,7 @@ struct StandardCMSProvider: ContentProvider {
             posterURL: URL(string: vod.picture),
             summary: vod.content.removingHTML,
             metadata: [vod.year, vod.area, vod.remarks].filter { !$0.isEmpty }.joined(separator: " · "),
-            episodes: episodes, director: vod.director.removingHTML,
+            episodes: MediaEpisode.prioritized(episodes), director: vod.director.removingHTML,
             actors: vod.actors.removingHTML, language: vod.language.removingHTML,
             releaseDate: vod.releaseDate.removingHTML, runningTime: vod.runningTime.removingHTML, category: vod.category.removingHTML, rating: vod.rating
         )

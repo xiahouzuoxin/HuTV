@@ -285,3 +285,37 @@ test.describe('touch phone', () => {
     await page.screenshot({ path: 'test-results/screenshots/hutv-web-mobile-landscape.png' });
   });
 });
+
+test('M3U8 is the default line while manual line selection is respected', async ({ page }) => {
+  const multi = {
+    ...fixture,
+    list: [
+      {
+        ...fixture.list[0],
+        vod_play_from: 'MP4$$$HLS',
+        vod_play_url:
+          '第1集$https://example.com/1.mp4$$$第1集$https://example.com/1.m3u8#第2集$https://example.com/2.m3u8',
+      },
+    ],
+  };
+  await page.route('**/api/fetch', (route) =>
+    route.fulfill({ contentType: 'application/json', body: JSON.stringify(multi) }),
+  );
+  await page.goto('/');
+  await page.getByLabel('搜索影片').fill('测试');
+  await page.getByLabel('搜索影片').press('Enter');
+  await page.getByRole('button', { name: '查看 测试电影' }).first().click();
+  const tabs = page.locator('.episode-section .tabs button');
+  await expect(tabs).toHaveText(['HLS', 'MP4']);
+  await expect(tabs.first()).toHaveClass('active');
+  await page.getByRole('button', { name: '开始观看', exact: true }).click();
+  await expect(page.locator('.player-heading small')).toContainText('HLS');
+  await page.getByRole('button', { name: '返回搜索结果', exact: true }).click();
+  await page.getByRole('button', { name: '查看 测试电影' }).first().click();
+  await page
+    .locator('.episode-section .tabs')
+    .getByRole('button', { name: 'MP4', exact: true })
+    .click();
+  await page.getByRole('button', { name: '开始观看', exact: true }).click();
+  await expect(page.locator('.player-heading small')).toContainText('MP4');
+});

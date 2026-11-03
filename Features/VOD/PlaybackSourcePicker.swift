@@ -74,7 +74,7 @@ private struct EpisodeSourceChoices: View {
     let current: MediaEpisode
     @Binding var keepPosition: Bool
     let onSelect: (PlaybackSourceSelection) -> Void
-    private var lines: [String] { episodes.reduce(into: []) { if !$0.contains($1.line) { $0.append($1.line) } } }
+    private var lines: [String] { MediaEpisode.prioritized(episodes).reduce(into: []) { if !$0.contains($1.line) { $0.append($1.line) } } }
 
     var body: some View {
         ForEach(lines, id: \.self) { line in

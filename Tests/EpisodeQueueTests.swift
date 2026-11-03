@@ -5,6 +5,31 @@ final class EpisodeQueueTests: XCTestCase {
     private func episode(_ id: String, line: String = "A") -> MediaEpisode {
         MediaEpisode(id: id, name: id, url: "https://example.com/\(id).m3u8", line: line)
     }
+    func testM3U8LinesComeFirstWithoutChangingEpisodeOrEquivalentLineOrder() {
+        let episodes = [
+            MediaEpisode(id: "mp4", name: "1", url: "https://example.com/1.mp4?next=.m3u8", line: "M3U8 名称但实际 MP4"),
+            MediaEpisode(id: "b2", name: "2", url: "https://example.com/2.M3U8?token=x", line: "B"),
+            MediaEpisode(id: "b1", name: "1", url: "https://example.com/1.m3u8", line: "B"),
+            MediaEpisode(id: "a1", name: "1", url: "https://example.com/a.m3u8", line: "A"),
+            MediaEpisode(id: "web", name: "1", url: "https://example.com/watch", line: "网页")
+        ]
+        let ordered = MediaEpisode.prioritized(episodes)
+        XCTAssertEqual(ordered.map(\.id), ["b2", "b1", "a1", "mp4", "web"])
+        XCTAssertTrue(ordered[0].isM3U8)
+        XCTAssertFalse(episodes[0].isM3U8)
+        let manual = EpisodeQueue(episodes: ordered, selected: episodes[0])
+        XCTAssertEqual(manual.current.id, "mp4")
+        XCTAssertEqual(MediaEpisode.prioritized(Array(episodes.prefix(1))).map(\.id), ["mp4"])
+    }
+
+    func testCMSDetailPrioritizesActualM3U8URLs() async throws {
+        let source = TVBoxSite(key: "priority", name: "priority", api: "https://example.com/api")
+        let detail = try await StandardCMSProvider(id: "priority", source: source, client: PriorityDetailClient()).detail(id: "1")
+        XCTAssertEqual(detail.episodes.map(\.line), ["HLS", "HLS", "MP4"])
+        XCTAssertEqual(detail.episodes.map(\.name), ["第1集", "第2集", "第1集"])
+        XCTAssertTrue(detail.episodes.first!.isM3U8)
+    }
+
     func testAdvancesInSourceOrderWithoutCrossingLinesOrWrapping() {
         let one = episode("1"), two = episode("2"), other = episode("other", line: "B")
         var queue = EpisodeQueue(episodes: [one, other, two], selected: one)
@@ -80,4 +105,11 @@ final class EpisodeQueueTests: XCTestCase {
         XCTAssertEqual(playback.queue.current.id, alternate.id)
     }
 
+}
+
+private struct PriorityDetailClient: HTTPDataLoading {
+    func data(for request: URLRequest, maximumBytes: Int, additionalValidStatusCodes: Set<Int>) async throws -> (Data, HTTPURLResponse) {
+        let body = #"{"list":[{"vod_id":1,"vod_name":"测试","vod_play_from":"MP4$$$HLS","vod_play_url":"第1集$https://example.com/1.mp4$$$第1集$https://example.com/1.M3U8?token=x#第2集$https://example.com/2.m3u8"}]}"#
+        return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    }
 }

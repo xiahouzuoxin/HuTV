@@ -23,11 +23,8 @@ struct MediaDetailView: View {
 
     private var orderedLines: [String] {
         guard let detail else { return [] }
-        let groups = Dictionary(grouping: detail.episodes, by: \MediaEpisode.line)
-        return groups.keys.sorted {
-            let left = groups[$0]!.contains(where: \.isDirectMedia)
-            let right = groups[$1]!.contains(where: \.isDirectMedia)
-            return left == right ? $0 < $1 : left && !right
+        return MediaEpisode.prioritized(detail.episodes).reduce(into: []) {
+            if !$0.contains($1.line) { $0.append($1.line) }
         }
     }
 
@@ -109,6 +106,9 @@ struct MediaDetailView: View {
                                 play(episode, startPosition: record.resumePosition)
                             }
                             .buttonStyle(.borderedProminent)
+                        } else if let episode = MediaEpisode.prioritized(detail.episodes).first(where: { $0.isDirectMedia }) {
+                            Button("开始观看") { play(episode) }
+                                .buttonStyle(.borderedProminent)
                         }
                     }
 

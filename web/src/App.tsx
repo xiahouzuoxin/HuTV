@@ -633,7 +633,12 @@ export default function App() {
                       {!detail.episode && detail.movie.episodes[0] && (
                         <button
                           className="button primary"
-                          onClick={() => chooseEpisode(detail.movie.episodes[0])}
+                          onClick={() =>
+                            chooseEpisode(
+                              detail.movie.episodes.find((episode) => episode.line === line) ??
+                                detail.movie.episodes[0],
+                            )
+                          }
                         >
                           <Play size={17} fill="currentColor" />
                           开始观看
