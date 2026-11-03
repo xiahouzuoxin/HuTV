@@ -3,7 +3,6 @@ import XCTest
 
 private struct RacingProvider: ContentProvider {
     let id = "race"
-    var slowDetail = false
     var source: TVBoxSite { TVBoxSite(key: id, name: id, api: "https://example.com") }
     func categories() async throws -> [MediaCategory] { [] }
     func search(keyword: String) async throws -> [MediaItem] { [] }
@@ -15,7 +14,6 @@ private struct RacingProvider: ContentProvider {
         return [item, item]
     }
     func detail(id: String) async throws -> MediaDetail {
-        if slowDetail { try? await Task.sleep(for: .milliseconds(80)) }
         return MediaDetail(id: id, title: id, posterURL: nil, summary: "", metadata: "", episodes: [
             MediaEpisode(id: "fresh1", name: "1", url: "https://example.com/fresh1.m3u8", line: "main"),
             MediaEpisode(id: "fresh2", name: "2", url: "https://example.com/fresh2.m3u8", line: "main")])
@@ -48,36 +46,33 @@ final class OptimizationTests: XCTestCase {
         XCTAssertFalse(model.isLoadingMore)
     }
 
-    @MainActor func testNextEpisodeGetsNewURLAndPreservesOpening() async throws {
+    @MainActor func testEpisodeSwitchUsesListedURLsAndPreservesOpening() {
         let provider = RacingProvider()
         let item = MediaItem(id: "movie", sourceID: "race", title: "movie", posterURL: nil, detailID: "movie")
-        let episodes = [MediaEpisode(id: "old1", name: "1", url: "https://example.com/expired1", line: "main"),
-                        MediaEpisode(id: "old2", name: "2", url: "https://example.com/expired2", line: "main")]
+        let episodes = [MediaEpisode(id: "1", name: "1", url: "https://example.com/listed1", line: "main"),
+                        MediaEpisode(id: "2", name: "2", url: "https://example.com/listed2", line: "main")]
         let session = OnDemandPlaybackSession(item: item, source: provider.source, episodes: episodes,
             selected: episodes[0], position: 300, episodeStart: 120)
-        let moved = await session.move(by: 1, provider: provider)
-        XCTAssertTrue(moved)
-        XCTAssertEqual(session.queue.current.url, "https://example.com/fresh2.m3u8")
+        let oldRevision = session.revision
+        XCTAssertTrue(session.advance(after: "1"))
+        XCTAssertEqual(session.queue.current.url, episodes[1].url)
         XCTAssertEqual(session.startPosition, 120)
-        XCTAssertFalse(session.isResolving)
-        let resolved = try await EpisodeResolver.resolve(item: item, source: provider.source, episode: episodes[0], provider: provider)
-        XCTAssertEqual(resolved.1.url, "https://example.com/fresh1.m3u8")
+        XCTAssertNotEqual(session.revision, oldRevision)
+        XCTAssertFalse(session.advance(after: "1"))
+        XCTAssertFalse(session.advance(after: "2"))
+        XCTAssertFalse(session.acceptProgress(301, duration: 600, revision: oldRevision))
+        XCTAssertTrue(session.retreat(before: "2"))
+        XCTAssertEqual(session.queue.current.url, episodes[0].url)
+        XCTAssertEqual(session.position, 120)
+        XCTAssertFalse(session.retreat(before: "1"))
     }
 
-    @MainActor func testCancelledEpisodeResolutionDoesNotChangeQueue() async {
-        let provider = RacingProvider(slowDetail: true)
+    func testExplicitResolutionStillGetsFreshURL() async throws {
+        let provider = RacingProvider()
         let item = MediaItem(id: "movie", sourceID: "race", title: "movie", posterURL: nil, detailID: "movie")
-        let episodes = [MediaEpisode(id: "1", name: "1", url: "https://example.com/1", line: "main"),
-                        MediaEpisode(id: "2", name: "2", url: "https://example.com/2", line: "main")]
-        let session = OnDemandPlaybackSession(item: item, source: provider.source, episodes: episodes, selected: episodes[0], position: 12)
-        let task = Task { await session.move(by: 1, provider: provider) }
-        while !session.isResolving { await Task.yield() }
-        task.cancel()
-        let moved = await task.value
-        XCTAssertFalse(moved)
-        XCTAssertEqual(session.queue.current.id, "1")
-        XCTAssertEqual(session.position, 12)
-        XCTAssertFalse(session.isResolving)
+        let episode = MediaEpisode(id: "1", name: "1", url: "https://example.com/old", line: "main")
+        let resolved = try await EpisodeResolver.resolve(item: item, source: provider.source, episode: episode, provider: provider)
+        XCTAssertEqual(resolved.1.url, "https://example.com/fresh1.m3u8")
     }
 
     func testStallMonitoringExcludesPauseBackgroundAndSeek() {

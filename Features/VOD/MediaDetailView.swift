@@ -223,7 +223,6 @@ private struct OnDemandPlayerView: View {
     @Binding var isFullscreen: Bool
     let onClose: () -> Void
     let onSourceSelected: (PlaybackSourceSelection) -> Void
-    @State private var selectionTask: Task<Void, Never>?
     @State private var finished = false
     @State private var showingSourcePicker = false
 
@@ -253,7 +252,7 @@ private struct OnDemandPlayerView: View {
                     },
                     onPrevious: { if playback.revision == run { retreat(before: episode.id) } },
                     onNext: { if playback.revision == run { advance(after: episode.id) } },
-                    canPrevious: playback.queue.hasPrevious && !playback.isResolving, canNext: playback.queue.hasNext && !playback.isResolving,
+                    canPrevious: playback.queue.hasPrevious, canNext: playback.queue.hasNext,
                     episodeStart: playback.episodeStart,
                     onSetEpisodeStart: { seconds in
                         history.setEpisodeStart(seconds, for: playback.item)
@@ -271,17 +270,10 @@ private struct OnDemandPlayerView: View {
             }
         }
         .onChange(of: run) { finished = false }
-        .onDisappear { selectionTask?.cancel(); history.flushPending() }
-        .overlay(alignment: .topLeading) {
-            if playback.isResolving { ProgressView("获取播放地址…").padding().background(.regularMaterial) }
-        }
-        .alert("切集失败", isPresented: Binding(get: { playback.resolutionError != nil }, set: { if !$0 { playback.resolutionError = nil } })) {
-            Button("好") { playback.resolutionError = nil }
-        } message: { Text(playback.resolutionError ?? "") }
+        .onDisappear { history.flushPending() }
         .sheet(isPresented: $showingSourcePicker) {
             PlaybackSourcePicker(item: playback.item, source: playback.source,
                                  episodes: playback.allEpisodes, current: playback.queue.current) { selection in
-                selectionTask?.cancel()
                 history.record(.vod(item: playback.item, source: playback.source, episode: playback.queue.current),
                                position: playback.position, duration: playback.duration)
                 playback.select(item: selection.item, source: selection.source, episodes: selection.episodes,
@@ -295,20 +287,13 @@ private struct OnDemandPlayerView: View {
     }
 
     private func retreat(before id: String) {
-        guard playback.queue.current.id == id else { return }
-        move(by: -1)
+        history.flushPending()
+        if playback.retreat(before: id) { finished = false }
     }
 
     private func advance(after id: String) {
-        guard playback.queue.current.id == id else { return }
-        move(by: 1)
-    }
-    private func move(by offset: Int) {
-        guard !playback.isResolving else { return }
-        selectionTask = Task {
-            history.flushPending()
-            if await playback.move(by: offset) { finished = false }
-        }
+        history.flushPending()
+        if playback.advance(after: id) { finished = false }
     }
 
 }

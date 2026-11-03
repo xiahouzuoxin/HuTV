@@ -21,6 +21,7 @@ struct PlayerPage<Content: View>: View {
     @State private var reloadRevision = 0
     @State private var controlsVisible = false
     @State private var interacting = false
+    @State private var isLocked = false
     @GestureState private var headerTouch = false
     @State private var activityRevision = UUID()
     @Environment(\.scenePhase) private var scenePhase
@@ -41,6 +42,7 @@ struct PlayerPage<Content: View>: View {
         .background(isFullscreen ? Color.black : Color(.systemBackground))
         .environment(\.playerReloadRevision, reloadRevision)
         .environment(\.playerFullscreen, isFullscreen)
+        .environment(\.playerLocked, isLocked)
         .environment(\.playerToggleFullscreen, {
             if isFullscreen { onExitFullscreen() }
             if let fullscreen { fullscreen.wrappedValue.toggle() }
@@ -55,8 +57,10 @@ struct PlayerPage<Content: View>: View {
     private var player: some View {
         ZStack(alignment: .top) {
             Color.black.ignoresSafeArea()
-            content($controlsVisible)
-            if controlsVisible {
+            content(Binding(get: { controlsVisible && !isLocked }, set: { if !isLocked { controlsVisible = $0 } }))
+                .allowsHitTesting(!isLocked)
+                .accessibilityHidden(isLocked)
+            if controlsVisible && !isLocked {
                 HStack(spacing: 16) {
                     Button { close() } label: {
                         Image(systemName: "xmark.circle.fill").font(.title)
@@ -80,6 +84,34 @@ struct PlayerPage<Content: View>: View {
                 .transition(.opacity)
                 .simultaneousGesture(DragGesture(minimumDistance: 0)
                     .updating($headerTouch) { _, touching, _ in touching = true })
+            }
+        }
+        .overlay {
+            if isLocked {
+                Color.clear.contentShape(Rectangle())
+                    .onTapGesture { }
+                    .gesture(DragGesture(minimumDistance: 0).onChanged { _ in })
+                    .accessibilityHidden(true)
+            }
+        }
+        .overlay(alignment: .leading) {
+            if controlsVisible || isLocked {
+                Button {
+                    isLocked.toggle()
+                    controlsVisible = !isLocked
+                    interacting = false
+                    registerInteraction(.activity)
+                } label: {
+                    Image(systemName: isLocked ? "lock.fill" : "lock.open")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.white.opacity(isLocked ? 0.65 : 1))
+                        .frame(width: 44, height: 44)
+                        .background(.black.opacity(0.45), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 12)
+                .accessibilityLabel(isLocked ? "解锁播放器" : "锁定播放器")
+                .accessibilityHint(isLocked ? "恢复播放控制和触屏手势" : "屏蔽播放控制和触屏手势")
             }
         }
         .onChange(of: headerTouch) { _, active in registerInteraction(active ? .began : .ended) }

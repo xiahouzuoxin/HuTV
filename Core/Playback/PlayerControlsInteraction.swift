@@ -39,3 +39,11 @@ extension EnvironmentValues {
         set { self[PlayerReloadRevisionKey.self] = newValue }
     }
 }
+
+private struct PlayerLockedKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    var playerLocked: Bool {
+        get { self[PlayerLockedKey.self] }
+        set { self[PlayerLockedKey.self] = newValue }
+    }
+}

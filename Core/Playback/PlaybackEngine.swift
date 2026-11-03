@@ -27,6 +27,7 @@ struct NativePlayerView: View {
     var isLive = false
     var onCheckpoint: (() -> Void)? = nil
     var onReload: (() async throws -> PlaybackResource)? = nil
+    @Environment(\.playerLocked) private var isLocked
     @Environment(\.playerReloadRevision) private var reloadRevision
     @State private var reloadedResource: PlaybackResource?
     @State private var reloadTask: Task<Void, Never>?
@@ -78,7 +79,7 @@ struct NativePlayerView: View {
                     episodeStart: episodeStart, onSetEpisodeStart: onSetEpisodeStart) }
                     .transition(.opacity)
             }
-            if (controlsVisible || controller.isPaused) && controller.ready && controller.errorMessage == nil {
+            if !isLocked && !reloading && (controlsVisible || controller.isPaused) && controller.ready && controller.errorMessage == nil {
                 HStack(spacing: 28) {
                     Button {
                         interaction(.activity)
@@ -110,7 +111,7 @@ struct NativePlayerView: View {
                 .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
                 .allowsHitTesting(false)
             }
-            if let error = controller.errorMessage {
+            if let error = controller.errorMessage, !reloading {
                 VStack(spacing: 12) {
                     Image(systemName: "exclamationmark.triangle").font(.largeTitle)
                     Text(error).multilineTextAlignment(.center)
@@ -148,9 +149,6 @@ struct NativePlayerView: View {
                 recoveryAttempts += 1
                 reload(automatic: true)
             }
-        }
-        .overlay(alignment: .topLeading) {
-            if reloading { Text("正在重新加载…").padding().background(.regularMaterial) }
         }
         .alert("重新加载失败", isPresented: Binding(get: { reloadError != nil }, set: { if !$0 { reloadError = nil } })) {
             Button("好") { reloadError = nil }
@@ -203,11 +201,13 @@ struct NativePlayerView: View {
     }
 
     private func toggleControls() {
+        guard !isLocked else { return }
         interaction(.activity)
         withAnimation(.easeInOut(duration: 0.15)) { controlsVisible.toggle() }
     }
 
     private func togglePlayback() {
+        guard !isLocked else { return }
         interaction(.activity)
         guard controller.ready, controller.errorMessage == nil else { return }
         controller.togglePlay()
@@ -215,7 +215,7 @@ struct NativePlayerView: View {
     }
 
     private func handlePan(_ state: UIGestureRecognizer.State, _ delta: CGPoint, _ location: CGPoint, _ size: CGSize) {
-        guard size.width > 0, size.height > 0 else { return }
+        guard !isLocked, size.width > 0, size.height > 0 else { return }
         if state == .began {
             interaction(.began)
             gestureMode = nil
