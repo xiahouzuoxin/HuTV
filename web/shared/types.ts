@@ -1,3 +1,12 @@
+export type RequestMode = 'auto' | 'direct' | 'proxy';
+export const requestModes: Record<RequestMode, string> = {
+  auto: '自动',
+  direct: '浏览器直连',
+  proxy: '服务器代理',
+};
+export function requestMode(value: unknown): RequestMode {
+  return value === 'direct' || value === 'proxy' ? value : 'auto';
+}
 export type SourceKind = 'cms' | 'live';
 export interface Source {
   id: string;
@@ -5,6 +14,7 @@ export interface Source {
   url: string;
   kind: SourceKind;
   enabled: boolean;
+  requestMode?: RequestMode;
 }
 export interface Rating {
   value: number;

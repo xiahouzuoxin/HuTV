@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { defaults } from '../shared/defaults';
 const fixture = {
   class: [{ type_id: 1, type_name: '电影' }],
   pagecount: 2,
@@ -19,6 +20,11 @@ const fixture = {
   ],
 };
 test.beforeEach(async ({ page }) => {
+  // Keep fixtures independent of upstream network/CORS; auto then exercises the proxy.
+  await page.route(
+    (url) => defaults.some((source) => new URL(source.url).origin === url.origin),
+    (route) => route.abort('failed'),
+  );
   await page.route('**/api/discovery**', (route) =>
     route.fulfill({
       contentType: 'application/json',
@@ -78,7 +84,7 @@ test('desktop browsing, subscriptions, search and metadata', async ({ page }) =>
   await expect(page.getByText('豆瓣评分（源提供） 7.8')).toBeVisible();
   await expect(page.getByText('这是一段影片介绍')).toBeVisible();
   await expect(page.getByRole('button', { name: '第1集', exact: true })).toBeVisible();
-  await page.screenshot({ path: '/private/tmp/hutv-web-detail.png', fullPage: true });
+  await page.screenshot({ path: 'test-results/screenshots/hutv-web-detail.png', fullPage: true });
 });
 test('playback persists history and lock blocks controls', async ({ page }) => {
   await page.goto('/');
@@ -125,14 +131,14 @@ test('mobile layout and JSON subscription import', async ({ page }) => {
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
   ).toBeTruthy();
-  await page.screenshot({ path: '/private/tmp/hutv-web-mobile.png', fullPage: true });
+  await page.screenshot({ path: 'test-results/screenshots/hutv-web-mobile.png', fullPage: true });
 });
 test('discovery homepage has no errors and fits desktop', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('/');
   await expect(page.getByRole('button', { name: '查看 另一部推荐' })).toBeVisible();
-  await page.screenshot({ path: '/private/tmp/hutv-web-home.png', fullPage: true });
+  await page.screenshot({ path: 'test-results/screenshots/hutv-web-home.png', fullPage: true });
   expect(errors).toEqual([]);
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
@@ -205,4 +211,76 @@ test('refresh errors preserve cached recommendations and native source browsing 
   await page.getByLabel('选择点播源').selectOption('cms-0');
   await expect(page.getByRole('button', { name: '查看 测试电影' })).toBeVisible();
   await expect(page.getByRole('button', { name: '刷新片库', exact: true })).toBeVisible();
+});
+
+test('request mode is editable and survives reload', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: '我的订阅', exact: false }).click();
+  await page.getByRole('button', { name: '编辑 暴风资源' }).click();
+  await expect(page.getByLabel('请求模式', { exact: true })).toHaveValue('auto');
+  await page.getByLabel('请求模式', { exact: true }).selectOption('proxy');
+  await page.getByRole('button', { name: '保存修改' }).click();
+  await page.reload();
+  await page.getByRole('button', { name: '我的订阅', exact: false }).click();
+  await page.getByRole('button', { name: '编辑 暴风资源' }).click();
+  await expect(page.getByLabel('请求模式', { exact: true })).toHaveValue('proxy');
+});
+
+test.describe('touch phone', () => {
+  test.use({ isMobile: true, hasTouch: true });
+  test('phone playback fits narrow portrait and landscape and fullscreen exits cleanly', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 740 });
+    await page.goto('/');
+    await page.getByLabel('搜索影片').fill('测试');
+    await page.getByLabel('搜索影片').press('Enter');
+    await page.getByRole('button', { name: '查看 测试电影' }).first().click();
+    await page.getByRole('button', { name: '第1集', exact: true }).click();
+    const player = page.locator('.player');
+    await expect(page.getByRole('button', { name: '全屏播放', exact: true })).toBeVisible();
+    for (const width of [320, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+        true,
+      );
+      const bounds = await player.boundingBox();
+      const control = await page
+        .getByRole('button', { name: '全屏播放', exact: true })
+        .boundingBox();
+      expect(control!.x + control!.width).toBeLessThanOrEqual(bounds!.x + bounds!.width);
+    }
+    await page.screenshot({
+      path: 'test-results/screenshots/hutv-web-mobile-player.png',
+      fullPage: true,
+    });
+    await page.getByRole('button', { name: '全屏播放', exact: true }).click();
+    await expect(player).toHaveAttribute('data-fullscreen', 'element');
+    expect(
+      await page.evaluate(() => document.fullscreenElement?.classList.contains('player')),
+    ).toBe(true);
+    await page.getByRole('button', { name: '退出全屏', exact: true }).click();
+    await expect(player).toHaveAttribute('data-fullscreen', 'inline');
+    // Simulate an iPhone browser exposing video-only fullscreen.
+    await player.evaluate((box) => {
+      Object.defineProperty(box, 'requestFullscreen', { configurable: true, value: undefined });
+      const video = box.querySelector('video')!;
+      Object.assign(video, {
+        webkitEnterFullscreen: () => video.dispatchEvent(new Event('webkitbeginfullscreen')),
+      });
+    });
+    await page.getByRole('button', { name: '全屏播放', exact: true }).click();
+    await expect(player).toHaveAttribute('data-fullscreen', 'video');
+    await page.locator('video').dispatchEvent('webkitendfullscreen');
+    await expect(player).toHaveAttribute('data-fullscreen', 'inline');
+    await expect(player).not.toHaveClass(/fullscreen/);
+    await page.setViewportSize({ width: 844, height: 390 });
+    await expect(page.getByRole('button', { name: '打开导航', exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+    const control = await page.getByRole('button', { name: '全屏播放', exact: true }).boundingBox();
+    expect(control!.y + control!.height).toBeLessThanOrEqual(390);
+    await page.screenshot({ path: 'test-results/screenshots/hutv-web-mobile-landscape.png' });
+  });
 });

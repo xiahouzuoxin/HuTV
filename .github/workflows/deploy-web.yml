@@ -1,0 +1,107 @@
+name: Deploy HuTV Web
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - '.github/workflows/deploy-web.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - '.github/workflows/deploy-web.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Finish an in-progress deployment before starting another one.
+concurrency:
+  group: hutv-web-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: web/.node-version
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npm run validate
+      - name: Validate Cloudflare bundle
+        run: npx --no-install wrangler deploy --dry-run
+      - name: Install browser
+        run: npx --no-install playwright install --with-deps chromium
+      - name: Browser tests
+        run: npm run test:e2e
+
+  deploy:
+    needs: check
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: web/.node-version
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Check deployment credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo '::error::Configure CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in repository Actions secrets. See web/README.md.'
+            exit 1
+          fi
+      - run: npm ci
+      - run: npm run build
+      - name: Deploy to Cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --no-install wrangler deploy
+      - name: Verify public deployment
+        env:
+          DEPLOYMENT_URL: ${{ vars.HUTV_WEB_URL || 'https://hutv-web.hutv-web.workers.dev' }}
+        run: |
+          node --input-type=module <<'JS'
+          const base = process.env.DEPLOYMENT_URL;
+          let lastError;
+          for (let attempt = 0; attempt < 6; attempt++) {
+            try {
+              for (const path of ['/', '/api/health']) {
+                const response = await fetch(new URL(path, base), { signal: AbortSignal.timeout(15000) });
+                if (!response.ok) throw new Error(`${path}: HTTP ${response.status}`);
+                if (path === '/api/health') {
+                  const health = await response.json();
+                  if (health.ok !== true || health.app !== 'HuTV Web') throw new Error('Unexpected health response');
+                } else if (!(await response.text()).includes('<title>HuTV')) {
+                  throw new Error('Unexpected homepage');
+                }
+              }
+              console.log(`Verified ${base}`);
+              process.exit(0);
+            } catch (error) {
+              lastError = error;
+              if (attempt < 5) await new Promise(resolve => setTimeout(resolve, 5000));
+            }
+          }
+          throw lastError;
+          JS

@@ -1770,7 +1770,7 @@ img {
     width: 100%;
   }
 }
-@media (max-width: 600px) {
+@media (max-width: 600px), (max-height: 500px) and (pointer: coarse) {
   .sidebar {
     transform: translateX(-100%);
     width: 235px;
@@ -2152,7 +2152,7 @@ img {
 .discovery-content .state-error {
   margin-bottom: 22px;
 }
-@media (max-width: 600px) {
+@media (max-width: 600px), (max-height: 500px) and (pointer: coarse) {
   .discovery-toolbar {
     gap: 10px;
     margin-bottom: 16px;
@@ -2176,5 +2176,159 @@ img {
   .discovery-caption > svg {
     flex-shrink: 0;
     margin-top: 2px;
+  }
+}
+
+/* System fullscreen and mobile layouts must also fit short landscape viewports. */
+.player.fullscreen {
+  border-radius: 0;
+  min-height: 0;
+}
+.player.fullscreen .player-heading {
+  padding-top: max(12px, env(safe-area-inset-top));
+  padding-left: max(16px, env(safe-area-inset-left));
+  padding-right: max(16px, env(safe-area-inset-right));
+}
+.player.fullscreen .player-controls {
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  padding-left: max(12px, env(safe-area-inset-left));
+  padding-right: max(12px, env(safe-area-inset-right));
+}
+.player-heading > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.player-heading > button {
+  flex-shrink: 0;
+}
+@media (max-width: 600px), (max-height: 500px) and (pointer: coarse) {
+  .topbar {
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+    height: auto;
+    min-height: 64px;
+    padding-top: max(8px, env(safe-area-inset-top));
+    padding-bottom: 8px;
+  }
+  .global-search {
+    min-width: 0;
+  }
+  .global-search input,
+  .modal input,
+  .modal select,
+  .modal textarea,
+  .settings-card select,
+  .live-toolbar input,
+  .live-toolbar select {
+    font-size: 16px;
+  }
+  .modal-backdrop {
+    padding: 12px;
+  }
+  .modal {
+    max-height: calc(100dvh - 24px);
+    padding: 20px;
+  }
+  .sidebar {
+    padding-top: max(24px, env(safe-area-inset-top));
+    max-height: 100dvh;
+    overflow-y: auto;
+  }
+  .page-content {
+    padding-left: max(14px, env(safe-area-inset-left));
+    padding-right: max(14px, env(safe-area-inset-right));
+  }
+  .player:not(.fullscreen) {
+    min-height: 0;
+    aspect-ratio: 16 / 9;
+  }
+  .player-controls {
+    padding: 12px 8px 6px;
+  }
+  .transport {
+    display: grid;
+    grid-template-columns: 32px 32px 32px 1fr 36px;
+    gap: 2px 6px;
+  }
+  .transport button {
+    width: 32px;
+    height: 36px;
+  }
+  .transport > span:first-of-type {
+    grid-row: 1;
+    grid-column: 4;
+    text-align: right;
+  }
+  .transport > span:last-of-type {
+    display: none;
+  }
+  .transport input {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+    margin: 8px 0 6px;
+  }
+  .transport > button:last-child {
+    grid-column: 5;
+    grid-row: 1;
+  }
+  .player-options {
+    margin-bottom: 0;
+    gap: 8px;
+  }
+  .player-options button,
+  .player-options select {
+    min-width: 36px;
+    min-height: 32px;
+    font-size: 12px;
+  }
+  .player-heading {
+    padding: 8px 10px;
+  }
+  .player-heading small {
+    margin-top: 2px;
+  }
+  .center-controls {
+    padding-bottom: 30px;
+  }
+  .lock-button {
+    width: 36px;
+    height: 36px;
+    top: 38%;
+  }
+  .player.fullscreen .center-controls {
+    padding-bottom: 0;
+  }
+}
+
+.player-error p {
+  margin: 0;
+}
+@media (max-width: 600px), (max-height: 500px) and (pointer: coarse) {
+  .player-error {
+    top: 38%;
+    padding: 8px;
+    gap: 5px;
+    line-height: 1.5;
+  }
+  .player-error .button {
+    padding: 6px 12px;
+  }
+}
+
+.mobile-total {
+  display: none;
+}
+@media (max-width: 600px), (max-height: 500px) and (pointer: coarse) {
+  .mobile-total {
+    display: inline;
+    font: inherit;
+  }
+}
+@media (max-height: 500px) and (pointer: coarse) {
+  .player:not(.fullscreen) {
+    width: 100%;
+    height: max(160px, calc(100dvh - 150px));
+    aspect-ratio: auto;
   }
 }

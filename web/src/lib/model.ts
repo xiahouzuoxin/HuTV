@@ -1,3 +1,4 @@
+import { requestMode } from '../../shared/types';
 import type { Category, Channel, Episode, Movie, Rating, Source } from '../../shared/types';
 const value = (x: unknown) =>
   typeof x === 'string' || typeof x === 'number' ? String(x).trim() : '';
@@ -170,6 +171,7 @@ export function importSources(text: string): Source[] {
       url,
       kind,
       enabled: typeof v.enabled === 'boolean' ? v.enabled : true,
+      requestMode: requestMode(v.requestMode),
     };
   });
 }

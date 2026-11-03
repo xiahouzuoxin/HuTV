@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { X, Plus, Link, FileJson, Upload, Check } from 'lucide-react';
-import type { Source } from '../../shared/types';
+import { requestMode, requestModes, type Source } from '../../shared/types';
 import { httpURL, downloadURL, importSources, sourceKey } from '../lib/model';
 import { fetchText } from '../lib/api';
 export function SourceEditor({
@@ -18,6 +18,7 @@ export function SourceEditor({
     [name, setName] = useState(source?.name ?? ''),
     [url, setUrl] = useState(source?.url ?? ''),
     [kind, setKind] = useState<'cms' | 'live'>(source?.kind === 'live' ? 'live' : 'cms'),
+    [mode, setMode] = useState(requestMode(source?.requestMode)),
     [text, setText] = useState(''),
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false),
@@ -91,6 +92,7 @@ export function SourceEditor({
                     url: httpURL(url),
                     kind,
                     enabled: source?.enabled ?? true,
+                    requestMode: mode,
                   },
                 ]);
               } else {
@@ -130,6 +132,23 @@ export function SourceEditor({
                   <option value="live">M3U / TXT · 直播</option>
                 </select>
               </label>
+              <label>
+                请求模式
+                <select
+                  aria-label="请求模式"
+                  value={mode}
+                  onChange={(e) => setMode(requestMode(e.target.value))}
+                >
+                  {Object.entries(requestModes).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p className="help">
+                自动先直连，失败后使用服务器代理；仅影响订阅数据，视频仍由浏览器直连。
+              </p>
               <label>
                 订阅地址
                 <div className="input-icon">

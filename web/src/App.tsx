@@ -271,7 +271,7 @@ export default function App() {
     setLiveError('');
     setChannels([]);
     setLiveGroup('all');
-    fetchText(s.url, c.signal)
+    fetchText(s.url, c.signal, s.requestMode)
       .then((text) => {
         if (!c.signal.aborted) {
           const rows = parseLive(text, s.url);
@@ -288,6 +288,7 @@ export default function App() {
     return () => c.abort();
   }, [view, liveSource, liveRun, hydrated, library.sources]);
   const openMovie = async (movie: Movie, s: Source, entry?: HistoryEntry) => {
+    s = stateRef.current.sources.find((source) => source.id === s.id) ?? s;
     detailController.current?.abort();
     const c = new AbortController();
     detailController.current = c;

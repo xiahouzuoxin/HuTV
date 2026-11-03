@@ -1,32 +1,57 @@
 import { readBoundedText } from '../../shared/bounded';
-import type { Source } from '../../shared/types';
+import { requestMode, type RequestMode, type Source } from '../../shared/types';
 import { parseCMS } from './model';
 export type CMSOperation = 'browse' | 'categories' | 'search' | 'detail';
-export async function fetchText(url: string, signal?: AbortSignal): Promise<string> {
+async function directText(url: string, signal: AbortSignal | undefined, timeout: number) {
+  if (
+    typeof location !== 'undefined' &&
+    location.protocol === 'https:' &&
+    new URL(url).protocol === 'http:'
+  )
+    throw Error('HTTPS 页面不能直连 HTTP 订阅，请使用服务器代理');
+  const response = await fetch(url, {
+    credentials: 'omit',
+    referrerPolicy: 'no-referrer',
+    signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(timeout)]),
+  });
+  if (!response.ok) throw Error(`直连失败（HTTP ${response.status}）`);
+  return readBoundedText(response);
+}
+async function proxyText(url: string, signal?: AbortSignal) {
+  const response = await fetch('/api/fetch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+    signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(20000)]),
+  });
+  if (response.ok) return readBoundedText(response);
+  const problem = await response.json().catch(() => ({}));
+  throw Error(problem.error || `代理失败（HTTP ${response.status}）`);
+}
+export async function fetchText(
+  url: string,
+  signal?: AbortSignal,
+  mode: RequestMode = 'auto',
+): Promise<string> {
+  if (signal?.aborted) throw new DOMException('已取消', 'AbortError');
   try {
-    const response = await fetch('/api/fetch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url }),
-      signal,
-    });
-    if (response.ok) return await response.text();
-    const problem = await response.json().catch(() => ({}));
-    if (response.status !== 403) throw Error(problem.error || '源请求失败');
-    // Custom sources can be fetched directly if their CORS policy allows it.
+    const selected = requestMode(mode);
+    if (selected === 'proxy') return await proxyText(url, signal);
     try {
-      const direct = await fetch(url, {
-        signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(20000)]),
-      });
-      if (!direct.ok) throw Error();
-      return await readBoundedText(direct);
-    } catch (e) {
-      if (signal?.aborted) throw e;
-      throw Error('此源无法直连，请将域名加入部署端 ALLOWED_ORIGINS 后重试');
+      return await directText(url, signal, selected === 'auto' ? 6000 : 20000);
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      if (selected === 'direct')
+        throw Error(
+          error instanceof Error && error.message.startsWith('HTTPS')
+            ? error.message
+            : '浏览器直连失败：请检查网络、跨域设置或改用服务器代理',
+        );
     }
-  } catch (e) {
+    return await proxyText(url, signal);
+  } catch (error) {
     if (signal?.aborted) throw new DOMException('已取消', 'AbortError');
-    throw e;
+    throw error;
   }
 }
 export async function cms(
@@ -38,7 +63,7 @@ export async function cms(
   const url = new URL(source.url);
   url.searchParams.set('ac', op === 'categories' ? 'list' : 'detail');
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-  return parseCMS(JSON.parse(await fetchText(url.href, signal)), source.id);
+  return parseCMS(JSON.parse(await fetchText(url.href, signal, source.requestMode)), source.id);
 }
 export async function concurrent<T>(
   values: T[],

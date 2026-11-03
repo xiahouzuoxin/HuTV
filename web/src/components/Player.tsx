@@ -16,6 +16,7 @@ import {
   VolumeX,
 } from 'lucide-react';
 import type { Movie, Episode, Settings } from '../../shared/types';
+import { enterFullscreen, type FullscreenMode, type WebkitVideo } from '../lib/fullscreen';
 import { time } from '../lib/model';
 interface Props {
   movie: Movie;
@@ -54,11 +55,12 @@ export function Player({
     [revision, setRevision] = useState(0),
     [visible, setVisible] = useState(true),
     [locked, setLocked] = useState(false),
-    [full, setFull] = useState(false),
+    [fullscreenMode, setFullscreenMode] = useState<FullscreenMode>('inline'),
     [muted, setMuted] = useState(false),
     [scrub, setScrub] = useState<number | null>(null),
     [reloading, setReloading] = useState(false),
     [activity, setActivity] = useState(0);
+  const full = fullscreenMode !== 'inline';
   const [rate, setRate] = useState(settings.rate);
   const initialStart = useRef(start);
   initialStart.current = start;
@@ -100,9 +102,7 @@ export function Player({
       if (alive) {
         setBusy(false);
         setVisible(true);
-        setError(
-          '此视频暂时无法播放。可能是源不可用、跨域限制或浏览器不支持该编码，请尝试其他线路。',
-        );
+        setError('视频无法播放，请尝试其他线路或重试。');
       }
     };
     connectionTimer = setTimeout(fail, 30000);
@@ -162,10 +162,33 @@ export function Player({
     if (video.current) video.current.playbackRate = rate;
   }, [rate]);
   useEffect(() => {
-    const changed = () => setFull(Boolean(document.fullscreenElement));
+    const v = video.current!;
+    const changed = () =>
+      setFullscreenMode(document.fullscreenElement === box.current ? 'element' : 'inline');
+    const began = () => setFullscreenMode('video');
+    const ended = () => setFullscreenMode('inline');
     document.addEventListener('fullscreenchange', changed);
-    return () => document.removeEventListener('fullscreenchange', changed);
+    v.addEventListener('webkitbeginfullscreen', began);
+    v.addEventListener('webkitendfullscreen', ended);
+    return () => {
+      document.removeEventListener('fullscreenchange', changed);
+      v.removeEventListener('webkitbeginfullscreen', began);
+      v.removeEventListener('webkitendfullscreen', ended);
+    };
   }, []);
+  useEffect(() => {
+    if (fullscreenMode !== 'viewport') return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const escape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFullscreenMode('inline');
+    };
+    window.addEventListener('keydown', escape);
+    return () => {
+      document.body.style.overflow = previous;
+      window.removeEventListener('keydown', escape);
+    };
+  }, [fullscreenMode]);
   useEffect(() => {
     const persist = () => save();
     window.addEventListener('pagehide', persist);
@@ -237,14 +260,18 @@ export function Player({
     return () => window.removeEventListener('keydown', key);
   });
   const fullscreen = async () => {
-    if (document.fullscreenElement) {
-      await document.exitFullscreen();
-      return;
-    }
     try {
-      await box.current?.requestFullscreen();
+      if (document.fullscreenElement === box.current) {
+        await document.exitFullscreen();
+      } else if (fullscreenMode === 'video') {
+        (video.current as WebkitVideo)?.webkitExitFullscreen?.();
+      } else if (fullscreenMode === 'viewport') {
+        setFullscreenMode('inline');
+      } else if (box.current && video.current) {
+        setFullscreenMode(await enterFullscreen(box.current, video.current));
+      }
     } catch {
-      setFull(!full);
+      // Keep the actual fullscreen state when the browser refuses an exit request.
     }
   };
   const progress = () => {
@@ -264,9 +291,10 @@ export function Player({
   return (
     <div
       ref={box}
-      className={`player ${full ? 'fullscreen' : ''}`}
-      onMouseMove={() => {
-        if (!locked) {
+      className={`player ${fullscreenMode === 'element' || fullscreenMode === 'viewport' ? 'fullscreen' : ''}`}
+      data-fullscreen={fullscreenMode}
+      onPointerMove={(event) => {
+        if (event.pointerType === 'mouse' && !locked) {
           setVisible(true);
           setActivity((x) => x + 1);
         }
@@ -347,12 +375,19 @@ export function Player({
       )}
       {(visible || paused) && !locked && (
         <>
-          <div className="player-heading" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="player-heading"
+            onClick={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+          >
             <span>
               {movie.title}
               <small>
                 {episode.line} · {episode.name}
               </small>
+              {fullscreenMode === 'viewport' && (
+                <small>当前浏览器仅支持页面内放大，地址栏由浏览器控制</small>
+              )}
             </span>
             <button
               className="icon-button"
@@ -436,7 +471,10 @@ export function Player({
               <button aria-label="下一集" disabled={!line[index + 1]} onClick={() => move(1)}>
                 <SkipForward size={19} />
               </button>
-              <span>{time(scrub ?? position)}</span>
+              <span>
+                {time(scrub ?? position)}
+                <small className="mobile-total"> / {time(duration)}</small>
+              </span>
               <input
                 aria-label="播放进度"
                 type="range"

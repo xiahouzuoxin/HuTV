@@ -1,9 +1,10 @@
 import { openDB } from 'idb';
 import { defaults, defaultSettings } from '../../shared/defaults';
 import type { Library, Source, HistoryEntry, Settings } from '../../shared/types';
+import { requestMode } from '../../shared/types';
 import { httpURL } from './model';
 export const initialLibrary = (): Library => ({
-  sources: structuredClone(defaults),
+  sources: defaults.map((source) => ({ ...source, requestMode: requestMode(source.requestMode) })),
   history: [],
   searches: [],
   openings: {},
@@ -52,6 +53,7 @@ export function validateLibrary(raw: unknown): Library {
         name: s.name.slice(0, 100),
         url: httpURL(s.url),
         enabled: s.enabled !== false,
+        requestMode: requestMode(s.requestMode),
       };
     });
   const settings: Settings = { ...defaultSettings, ...d.settings };

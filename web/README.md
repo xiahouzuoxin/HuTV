@@ -11,6 +11,7 @@
 - 原生 MP4 / HLS，以及按需加载的 HLS.js；缓冲进度、倍速、静音、全屏、上一集／下一集、自动连播、手动重新加载、起播位置和防误触锁。
 - 键盘空格播放／暂停，左右方向键快退／快进 10 秒。播放器显示控制后 5 秒自动隐藏，暂停时保留。
 - IndexedDB 本地观看历史和进度、继续观看、设置、备份导入导出和数据重置。
+- 系统全屏优先；iPhone 使用原生视频全屏时由系统显示播放控件，页面内放大作为不支持系统全屏时的回退。
 - 桌面、平板和手机布局；首页默认显示豆瓣推荐，电影／剧集分类按需加载，每类最多 20 条，缓存 24 小时，支持手动刷新；点击推荐在点播订阅中搜索。
 
 网页端暂未实现账号／跨设备同步、离线下载、网盘解析、JAR / JS 爬虫、媒体转码和视频分片代理。播放器不能绕过浏览器的格式、跨域、自动播放和后台运行限制；HLS.js 不会增加浏览器解码器。豆瓣推荐不代表订阅源一定有可播放资源，读取失败时保留已有缓存并可手动重试。
@@ -49,13 +50,29 @@ npx wrangler login
 npm run deploy
 ```
 
-部署后 Wrangler 会返回 `https://hutv-web.<你的子域>.workers.dev`。如需 GitHub 自动部署：在 Cloudflare Workers & Pages 中连接仓库，项目根目录设为 `web`，构建命令设为 `npm run build`，部署命令设为 `npx wrangler deploy`。先用免费默认域名验证页面、接口、播放在实际网络中的可达性，再绑定自己的域名。
+部署后 Wrangler 会返回 `https://hutv-web.<你的子域>.workers.dev`。先用免费默认域名验证页面、接口、播放在实际网络中的可达性，再绑定自己的域名。
+
+### GitHub Actions 自动部署
+
+仓库提供 [Deploy HuTV Web](../.github/workflows/deploy-web.yml) 工作流。推送到 `main` 且修改 `web/**` 或工作流文件时，先执行单元测试、构建、产物验证、Wrangler 打包检查和浏览器测试，通过后部署；PR 只检查，不部署。也可在 GitHub Actions 中选择此工作流，使用 `main` 分支手动 Run workflow。只修改 iOS 或根目录 README 不会触发部署。
+
+首次启用，在仓库 **Settings → Secrets and variables → Actions → Secrets** 添加：
+
+| Secret | 内容 |
+| --- | --- |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare 创建的专用部署 API Token，使用 **Edit Cloudflare Workers** 模板并限定到托管 HuTV 的账号 |
+| `CLOUDFLARE_ACCOUNT_ID` | 部署目标 Cloudflare 账号的 Account ID |
+
+Token 在 [Cloudflare API Tokens](https://dash.cloudflare.com/profile/api-tokens) 创建；不要把 Token 写入代码、聊天或普通 Variables，也不要复制本机 Wrangler 的 OAuth 凭据。具体权限和配置见 [Cloudflare GitHub Actions 文档](https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/)。
+
+部署完成会检查首页和 `/api/health`。默认检查当前公开地址；如果换账号、子域或域名，在仓库 Actions **Variables** 配置 `HUTV_WEB_URL` 为新的 HTTPS 站点地址。缺少凭据时部署步骤会明确报错，检查任务仍可运行。若此前启用了 Cloudflare 自带的 Git 构建，使用本工作流时应关闭对应自动构建，避免同一提交重复部署。
+
 
 截至 2026-11-03，Workers Free 动态请求额度为每天 100,000 次、每次 10ms CPU；静态资源请求免费且不限量。每个搜索源请求独立消耗一次动态请求，转发等待不等于 CPU 时间。保持 Free 方案即可从小规模使用开始，不要把视频文件或媒体分片转发放进本项目的数据代理。具体额度以[Cloudflare 定价](https://developers.cloudflare.com/workers/platform/pricing/)和[静态资源说明](https://developers.cloudflare.com/workers/static-assets/billing-and-limitations/)为准。
 
 ### 自定义订阅和代理白名单
 
-内置点播／直播域名及 `raw.githubusercontent.com` 默认允许通过服务器读取。自定义订阅先尝试代理；不在白名单时尝试浏览器直连。若源不允许跨域，需要在 `wrangler.jsonc` 的 `vars.ALLOWED_ORIGINS` 中添加准确的源 origin，例如：
+内置点播／直播域名及 `raw.githubusercontent.com` 默认允许通过服务器读取。订阅编辑中可按源选择请求模式，默认“自动”：先尝试浏览器直连，失败或 6 秒超时后使用代理；“浏览器直连”和“服务器代理”固定使用对应路径。CMS 搜索、详情、片库和直播列表均遵循此设置，JSON 单项导入可使用 `requestMode`（`auto`／`direct`／`proxy`），旧订阅默认为自动。此设置不改变视频流的直连路径。若源不允许跨域且不在内置白名单中，需要在 `wrangler.jsonc` 的 `vars.ALLOWED_ORIGINS` 中添加准确的源 origin，例如：
 
 ```json
 {"ALLOWED_ORIGINS":"https://your-cms.example,https://your-playlist.example"}
