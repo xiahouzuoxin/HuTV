@@ -220,6 +220,7 @@ test('request mode is editable and survives reload', async ({ page }) => {
   await expect(page.getByLabel('请求模式', { exact: true })).toHaveValue('auto');
   await page.getByLabel('请求模式', { exact: true }).selectOption('proxy');
   await page.getByRole('button', { name: '保存修改' }).click();
+  await expect(page.getByRole('dialog')).toBeHidden();
   await page.reload();
   await page.getByRole('button', { name: '我的订阅', exact: false }).click();
   await page.getByRole('button', { name: '编辑 暴风资源' }).click();

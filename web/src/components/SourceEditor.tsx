@@ -12,7 +12,7 @@ export function SourceEditor({
   source?: Source;
   sources: Source[];
   onClose: () => void;
-  onSave: (sources: Source[]) => void;
+  onSave: (sources: Source[]) => Promise<void>;
 }) {
   const [tab, setTab] = useState('single'),
     [name, setName] = useState(source?.name ?? ''),
@@ -23,14 +23,14 @@ export function SourceEditor({
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false),
     [preview, setPreview] = useState<Source[] | null>(null);
-  const commit = (entries: Source[]) => {
+  const commit = async (entries: Source[]) => {
     const keys = new Set(sources.filter((s) => s.id !== source?.id).map(sourceKey));
     const unique = entries.filter((s) => !keys.has(sourceKey(s)) && (keys.add(sourceKey(s)), true));
     if (!unique.length) {
       setError('这些订阅已经存在');
       return;
     }
-    onSave(
+    await onSave(
       source ? sources.map((s) => (s.id === source.id ? unique[0] : s)) : [...sources, ...unique],
     );
     onClose();
@@ -83,9 +83,10 @@ export function SourceEditor({
           onSubmit={async (e) => {
             e.preventDefault();
             setError('');
+            setBusy(true);
             try {
               if (tab === 'single') {
-                commit([
+                await commit([
                   {
                     id: source?.id ?? crypto.randomUUID(),
                     name: name.trim() || new URL(url).hostname,
@@ -97,7 +98,7 @@ export function SourceEditor({
                 ]);
               } else {
                 if (preview) {
-                  commit(preview);
+                  await commit(preview);
                   return;
                 }
                 setBusy(true);

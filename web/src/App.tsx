@@ -1520,7 +1520,10 @@ export default function App() {
           source={editor ?? undefined}
           sources={library.sources}
           onClose={() => setEditor(undefined)}
-          onSave={(sources) => setLibrary((old) => ({ ...old, sources }))}
+          onSave={async (sources) => {
+            if (canPersist) await saveLibrary({ ...stateRef.current, sources });
+            setLibrary((old) => ({ ...old, sources }));
+          }}
         />
       )}
       {toast && (
